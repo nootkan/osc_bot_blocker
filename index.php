@@ -8,7 +8,7 @@
  * Version: 1.2.0
  * Author: Van Isle Web Solutions
  * Author URI: https://www.vanislebc.com
- * License: GPL2+
+ * License: GPL3
  * 
  * Requires osClass: Enterprise 3.10.4 or Ospoint 8.2.1
  * 
