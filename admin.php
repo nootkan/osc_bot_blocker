@@ -8,7 +8,7 @@
  * @subpackage Admin
  * @author Van Isle Web Solutions
  * @link https://www.vanislebc.com/
- * @version 1.2.0
+ * @version 1.2.1
  */
 
 // Prevent direct access
