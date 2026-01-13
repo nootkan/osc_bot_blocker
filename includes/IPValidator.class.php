@@ -9,7 +9,7 @@
  * @subpackage Classes
  * @author Van Isle Web Solutions
  * @link https://www.vanislebc.com/
- * @version 1.0.0
+ * @version 1.2.1
  */
 
 // Prevent direct access
