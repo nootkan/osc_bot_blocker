@@ -2,12 +2,12 @@
 /**
  * OSC Bot Blocker - Admin Settings Controller (osClass Enterprise Compatible)
  * 
- * Radio button version - no dropdowns
+ * Radio button version - JavaScript redirects
  * 
  * @package OSCBotBlocker
  * @subpackage Admin
  * @author Van Isle Web Solutions
- * @version 1.2.1
+ * @version 1.2.3
  */
 
 if (!defined('ABS_PATH')) {
@@ -39,9 +39,6 @@ class OSCBBAdmin {
         if (empty($tab)) {
             $tab = 'general';
         }
-        
-        // Render page
-        osc_current_admin_theme_path('parts/header.php');
         
         if (function_exists('osc_show_flash_message')) {
             osc_show_flash_message();
@@ -79,8 +76,6 @@ class OSCBBAdmin {
         }
         
         echo '</div>';
-        
-        osc_current_admin_theme_path('parts/footer.php');
     }
     
     /**
@@ -113,8 +108,9 @@ class OSCBBAdmin {
         // Handle POST
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && Params::getParam('oscbb_tab') === 'general') {
             $this->saveGeneralSettings();
-            osc_add_flash_ok_message('Settings saved.');
-            osc_redirect_to(osc_admin_render_plugin_url('osc_bot_blocker/admin.php?tab=general'));
+            osc_add_flash_ok_message('General settings saved successfully.');
+            $url = osc_admin_render_plugin_url('osc_bot_blocker/admin.php') . '&tab=general';
+            echo '<script>window.location.href = "' . $url . '";</script>';
             exit;
         }
         
@@ -213,8 +209,9 @@ class OSCBBAdmin {
         // Handle POST
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && Params::getParam('oscbb_tab') === 'protection') {
             $this->saveProtectionSettings();
-            osc_add_flash_ok_message('Protection settings saved.');
-            osc_redirect_to(osc_admin_render_plugin_url('osc_bot_blocker/admin.php?tab=protection'));
+            osc_add_flash_ok_message('Protection settings saved successfully.');
+            $url = osc_admin_render_plugin_url('osc_bot_blocker/admin.php') . '&tab=protection';
+            echo '<script>window.location.href = "' . $url . '";</script>';
             exit;
         }
         
@@ -378,8 +375,9 @@ class OSCBBAdmin {
         // Handle POST
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && Params::getParam('oscbb_tab') === 'content') {
             $this->saveContentSettings();
-            osc_add_flash_ok_message('Content filtering settings saved.');
-            osc_redirect_to(osc_admin_render_plugin_url('osc_bot_blocker/admin.php?tab=content'));
+            osc_add_flash_ok_message('Content filtering settings saved successfully.');
+            $url = osc_admin_render_plugin_url('osc_bot_blocker/admin.php') . '&tab=content';
+            echo '<script>window.location.href = "' . $url . '";</script>';
             exit;
         }
         
@@ -648,7 +646,8 @@ class OSCBBAdmin {
                     osc_add_flash_error_message('Invalid format.');
                 }
             }
-            osc_redirect_to(osc_admin_render_plugin_url('osc_bot_blocker/admin.php?tab=whitelist'));
+            $url = osc_admin_render_plugin_url('osc_bot_blocker/admin.php') . '&tab=whitelist';
+            echo '<script>window.location.href = "' . $url . '";</script>';
             exit;
         }
         
@@ -660,7 +659,8 @@ class OSCBBAdmin {
                 $db->getOsclassDb()->exec($query);
                 osc_add_flash_ok_message('Entry removed from whitelist!');
             }
-            osc_redirect_to(osc_admin_render_plugin_url('osc_bot_blocker/admin.php?tab=whitelist'));
+            $url = osc_admin_render_plugin_url('osc_bot_blocker/admin.php') . '&tab=whitelist';
+            echo '<script>window.location.href = "' . $url . '";</script>';
             exit;
         }
         
@@ -777,7 +777,8 @@ class OSCBBAdmin {
                     osc_add_flash_error_message('Invalid format.');
                 }
             }
-            osc_redirect_to(osc_admin_render_plugin_url('osc_bot_blocker/admin.php?tab=blacklist'));
+            $url = osc_admin_render_plugin_url('osc_bot_blocker/admin.php') . '&tab=blacklist';
+            echo '<script>window.location.href = "' . $url . '";</script>';
             exit;
         }
         
@@ -789,7 +790,8 @@ class OSCBBAdmin {
                 $db->getOsclassDb()->exec($query);
                 osc_add_flash_ok_message('Entry deleted!');
             }
-            osc_redirect_to(osc_admin_render_plugin_url('osc_bot_blocker/admin.php?tab=blacklist'));
+            $url = osc_admin_render_plugin_url('osc_bot_blocker/admin.php') . '&tab=blacklist';
+            echo '<script>window.location.href = "' . $url . '";</script>';
             exit;
         }
         
@@ -801,7 +803,8 @@ class OSCBBAdmin {
                 $db->getOsclassDb()->exec($query);
                 osc_add_flash_ok_message('Entry status updated!');
             }
-            osc_redirect_to(osc_admin_render_plugin_url('osc_bot_blocker/admin.php?tab=blacklist'));
+            $url = osc_admin_render_plugin_url('osc_bot_blocker/admin.php') . '&tab=blacklist';
+            echo '<script>window.location.href = "' . $url . '";</script>';
             exit;
         }
         
