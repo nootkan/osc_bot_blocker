@@ -86,18 +86,23 @@ try {
     $admin->renderSettingsPage();
     
 } catch (Exception $e) {
-    // Display error for debugging
+    // Log error securely (not visible to users)
+    error_log('OSC Bot Blocker Admin Error: ' . $e->getMessage() . ' in ' . $e->getFile() . ' on line ' . $e->getLine());
+    
+    // Display generic error to user (no sensitive details)
     echo '<div style="padding: 20px; background: #ffebee; border: 2px solid #c62828; margin: 20px;">';
-    echo '<h2 style="color: #c62828;">OSC Bot Blocker - Admin Error</h2>';
-    echo '<p><strong>Error:</strong> ' . esc_html($e->getMessage()) . '</p>';
-    echo '<p><strong>File:</strong> ' . esc_html($e->getFile()) . '</p>';
-    echo '<p><strong>Line:</strong> ' . $e->getLine() . '</p>';
+    echo '<h2 style="color: #c62828;">OSC Bot Blocker - Configuration Error</h2>';
+    echo '<p>The plugin encountered an error while loading the admin interface.</p>';
     echo '<p style="margin-top: 20px; padding: 10px; background: #fff; border-left: 4px solid #ff9800;">';
-    echo '<strong>Troubleshooting:</strong><br>';
+    echo '<strong>Troubleshooting Steps:</strong><br>';
     echo '1. Check that all plugin files are uploaded correctly<br>';
     echo '2. Verify file permissions (644 for PHP files)<br>';
-    echo '3. Check your server error log for details<br>';
-    echo '4. Ensure database tables were created during installation';
+    echo '3. Check your server error log for detailed information<br>';
+    echo '4. Ensure database tables were created during installation<br>';
+    echo '5. Try deactivating and reactivating the plugin';
+    echo '</p>';
+    echo '<p style="margin-top: 15px; font-size: 13px; color: #666;">';
+    echo 'Error details have been logged to your server error log.';
     echo '</p>';
     echo '</div>';
 }
