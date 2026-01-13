@@ -231,7 +231,7 @@ class OSCBotBlocker {
         $cookie_value = time();
         $expiry = time() + 3600; // 1 hour
         
-        setcookie($cookie_name, $cookie_value, $expiry, '/', '', false, true); // httponly
+        setcookie($cookie_name, $cookie_value, $expiry, '/', '', true, true); // secure, httponly
     }
     
     /**
