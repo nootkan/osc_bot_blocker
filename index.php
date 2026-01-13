@@ -5,7 +5,7 @@
  * Plugin Name: OSC Bot Blocker
  * Plugin URI: https://www.yoursite.com/osc-bot-blocker
  * Description: Advanced anti-spam and bot protection for osClass. Blocks spam in items, contact forms, user registration, and comments without CAPTCHAs.
- * Version: 1.2.0
+ * Version: 1.2.1
  * Author: Van Isle Web Solutions
  * Author URI: https://www.vanislebc.com
  * License: GPL3
