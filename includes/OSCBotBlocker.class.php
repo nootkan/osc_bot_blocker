@@ -8,7 +8,7 @@
  * @package OSCBotBlocker
  * @subpackage Classes
  * @author Your Name
- * @version 1.0.0
+ * @version 1.2.1
  */
 
 // Prevent direct access
