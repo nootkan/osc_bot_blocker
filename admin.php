@@ -54,8 +54,8 @@ if (!function_exists('osc_create_nonce')) {
         }
         // Fallback: create simple token
         if (!isset($_SESSION['oscbb_token'])) {
-            $_SESSION['oscbb_token'] = md5(uniqid(rand(), true));
-        }
+    $_SESSION['oscbb_token'] = bin2hex(random_bytes(32));
+}
         return $_SESSION['oscbb_token'];
     }
 }
