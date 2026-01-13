@@ -244,7 +244,7 @@
         var expiryDate = new Date();
         expiryDate.setTime(expiryDate.getTime() + (24 * 60 * 60 * 1000)); // 24 hours
         
-        document.cookie = cookieName + '=' + cookieValue + '; expires=' + expiryDate.toUTCString() + '; path=/; SameSite=Lax';
+        document.cookie = cookieName + '=' + cookieValue + '; expires=' + expiryDate.toUTCString() + '; path=/; Secure; SameSite=Lax';
     }
     
     /**
