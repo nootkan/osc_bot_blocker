@@ -86,18 +86,31 @@ try {
     $admin->renderSettingsPage();
     
 } catch (Exception $e) {
-    // Display error for debugging
+    // Log the full error details securely
+    error_log('OSC Bot Blocker Admin Error: ' . $e->getMessage() . ' in ' . $e->getFile() . ' on line ' . $e->getLine());
+    
+    // Show generic error message to user (no sensitive details)
     echo '<div style="padding: 20px; background: #ffebee; border: 2px solid #c62828; margin: 20px;">';
-    echo '<h2 style="color: #c62828;">OSC Bot Blocker - Admin Error</h2>';
-    echo '<p><strong>Error:</strong> ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8') . '</p>';
-    echo '<p><strong>File:</strong> ' . htmlspecialchars($e->getFile(), ENT_QUOTES, 'UTF-8') . '</p>';
-    echo '<p><strong>Line:</strong> ' . $e->getLine() . '</p>';
-    echo '<p style="margin-top: 20px; padding: 10px; background: #fff; border-left: 4px solid #ff9800;">';
-    echo '<strong>Troubleshooting:</strong><br>';
+    echo '<h2 style="color: #c62828;">OSC Bot Blocker - Error</h2>';
+    echo '<p><strong>An error occurred while loading the plugin settings.</strong></p>';
+    
+    // Only show details if debug mode is enabled
+    if (defined('OSCBB_DEBUG') && OSCBB_DEBUG === true) {
+        echo '<div style="margin-top: 15px; padding: 10px; background: #fff3cd; border-left: 4px solid #ffc107;">';
+        echo '<p style="margin: 0 0 10px 0;"><strong>Debug Information (visible because OSCBB_DEBUG is enabled):</strong></p>';
+        echo '<p style="margin: 5px 0;"><strong>Error:</strong> ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8') . '</p>';
+        echo '<p style="margin: 5px 0;"><strong>File:</strong> ' . htmlspecialchars($e->getFile(), ENT_QUOTES, 'UTF-8') . '</p>';
+        echo '<p style="margin: 5px 0;"><strong>Line:</strong> ' . $e->getLine() . '</p>';
+        echo '</div>';
+    }
+    
+    echo '<p style="margin-top: 20px; padding: 10px; background: #fff; border-left: 4px solid #0073aa;">';
+    echo '<strong>Troubleshooting Steps:</strong><br>';
     echo '1. Check that all plugin files are uploaded correctly<br>';
     echo '2. Verify file permissions (644 for PHP files)<br>';
-    echo '3. Check your server error log for details<br>';
-    echo '4. Ensure database tables were created during installation';
+    echo '3. Check your server error log for detailed error information<br>';
+    echo '4. Ensure database tables were created during installation<br>';
+    echo '5. Contact support if the issue persists';
     echo '</p>';
     echo '</div>';
 }
