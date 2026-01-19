@@ -466,6 +466,9 @@ class OSCBBAdmin {
         $week_ago = date('Y-m-d', strtotime('-7 days'));
         $month_ago = date('Y-m-d', strtotime('-30 days'));
         
+        $conn = $db->getOsclassDb();
+        $comm = new DBCommandClass($conn);
+        
         $query = "SELECT 
                     COUNT(CASE WHEN DATE(dt_date) = '$today' THEN 1 END) as today,
                     COUNT(CASE WHEN DATE(dt_date) >= '$week_ago' THEN 1 END) as week,
@@ -474,10 +477,10 @@ class OSCBBAdmin {
                   FROM " . OSCBB_TABLE_LOG . " 
                   WHERE s_blocked = 1";
         
-        $db_result = $db->getOsclassDb()->query($query);
+        $db_result = $comm->query($query);
         $result = false;
         if ($db_result) {
-            $result = $db_result->fetch(PDO::FETCH_ASSOC);
+            $result = $db_result->row();
         }
         
         $blocks_today = ($result && isset($result['today'])) ? (int)$result['today'] : 0;
@@ -492,12 +495,10 @@ class OSCBBAdmin {
                   GROUP BY s_type 
                   ORDER BY count DESC LIMIT 5";
         
-        $db_result = $db->getOsclassDb()->query($query);
+        $db_result = $comm->query($query);
         $block_types = array();
-        if ($db_result) {
-            while ($row = $db_result->fetch(PDO::FETCH_ASSOC)) {
-                $block_types[] = $row;
-            }
+        if ($db_result && $db_result->numRows() > 0) {
+            $block_types = $db_result->result();
         }
         ?>
         
@@ -535,7 +536,7 @@ class OSCBBAdmin {
             </tr>
             <?php foreach ($block_types as $type): ?>
             <tr>
-                <td style="padding:10px; border:1px solid #ddd; text-transform:capitalize;"><?php echo esc_html($type['s_type']); ?></td>
+                <td style="padding:10px; border:1px solid #ddd; text-transform:capitalize;"><?php echo htmlspecialchars($type['s_type']); ?></td>
                 <td style="padding:10px; text-align:right; border:1px solid #ddd; font-weight:bold;"><?php echo number_format($type['count']); ?></td>
             </tr>
             <?php endforeach; ?>
@@ -556,25 +557,109 @@ class OSCBBAdmin {
      */
     private function renderLogs() {
         $db = DBConnectionClass::newInstance();
+        $conn = $db->getOsclassDb();
+        $comm = new DBCommandClass($conn);
         
-        // Get recent logs
+        // Handle cleanup action
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && Params::getParam('action') === 'cleanup_logs') {
+            $days = (int)Params::getParam('cleanup_days');
+            $deleted = $this->cleanupLogs($days);
+            
+            if ($deleted !== false) {
+                osc_add_flash_ok_message('Successfully deleted ' . $deleted . ' log entries!');
+            } else {
+                osc_add_flash_error_message('Failed to delete logs. Please try again.');
+            }
+            
+            $url = osc_admin_render_plugin_url('osc_bot_blocker/admin.php') . '&tab=logs';
+            echo '<script>window.location.href = "' . $url . '";</script>';
+            exit;
+        }
+        
+        // Pagination settings
+        $logs_per_page = 10;
+        $current_page = max(1, (int)Params::getParam('log_page'));
+        $offset = ($current_page - 1) * $logs_per_page;
+        
+        // Get total log count
+        $count_query = "SELECT COUNT(*) as total FROM " . OSCBB_TABLE_LOG;
+        $count_result = $comm->query($count_query);
+        $total_logs = 0;
+        if ($count_result) {
+            $count_row = $count_result->row();
+            $total_logs = $count_row ? (int)$count_row['total'] : 0;
+        }
+        
+        // Calculate pagination
+        $total_pages = max(1, ceil($total_logs / $logs_per_page));
+        $current_page = min($current_page, $total_pages); // Don't exceed max pages
+        $start_item = ($current_page - 1) * $logs_per_page + 1;
+        $end_item = min($current_page * $logs_per_page, $total_logs);
+        
+        // Get logs for current page
         $query = "SELECT * FROM " . OSCBB_TABLE_LOG . " 
                   WHERE s_blocked = 1 
                   ORDER BY dt_date DESC 
-                  LIMIT 50";
+                  LIMIT " . $logs_per_page . " OFFSET " . $offset;
         
-        $db_result = $db->getOsclassDb()->query($query);
+        $result = $comm->query($query);
         $logs = array();
-        if ($db_result) {
-            while ($row = $db_result->fetch(PDO::FETCH_ASSOC)) {
-                $logs[] = $row;
-            }
+        if ($result && $result->numRows() > 0) {
+            $logs = $result->result();
         }
+        
+        // Base URL for pagination
+        $base_url = osc_admin_render_plugin_url('osc_bot_blocker/admin.php') . '&tab=logs';
         ?>
         
-        <h3>Recent Blocks (Last 50)</h3>
+        <!-- Cleanup Form -->
+        <div style="background:#fff9e6; border-left:4px solid #f0ad4e; padding:15px; margin-bottom:20px;">
+            <h4 style="margin:0 0 10px 0;">🧹 Manual Log Cleanup</h4>
+            <p style="margin:0 0 15px 0;">
+                <strong>Total logs in database:</strong> <?php echo number_format($total_logs); ?> entries<br>
+                <small>Clean up old logs to keep your database lean. This action cannot be undone!</small>
+            </p>
+            
+            <form method="POST" onsubmit="return confirm('Are you sure you want to delete these logs? This action cannot be undone!');" style="display:flex; gap:10px; align-items:flex-end;">
+                <input type="hidden" name="action" value="cleanup_logs">
+                
+                <div>
+                    <label for="cleanup_days" style="display:block; margin-bottom:5px; font-weight:bold;">Delete logs older than:</label>
+                    <select name="cleanup_days" id="cleanup_days" style="padding:8px; border:1px solid #ddd; border-radius:3px;">
+                        <option value="7">7 days</option>
+                        <option value="30">30 days</option>
+                        <option value="90">90 days</option>
+                        <option value="180">180 days</option>
+                        <option value="365">1 year</option>
+                        <option value="0">All logs (WARNING!)</option>
+                    </select>
+                </div>
+                
+                <button type="submit" style="padding:8px 16px; background:#f0ad4e; color:#fff; border:none; border-radius:3px; cursor:pointer; font-weight:bold;">
+                    🗑️ Delete Old Logs
+                </button>
+            </form>
+        </div>
         
-        <?php if (!empty($logs)): ?>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+            <div>
+                <h3 style="margin:0 0 5px 0;">Block Log</h3>
+                <p style="margin:0; color:#666; font-size:13px;">
+                    Showing <?php echo number_format($start_item); ?>-<?php echo number_format($end_item); ?> of <?php echo number_format($total_logs); ?> logs
+                </p>
+            </div>
+            <a href="<?php echo osc_base_url() . 'oc-content/plugins/osc_bot_blocker/download-logs.php'; ?>" 
+               class="btn btn-primary" 
+               style="padding:8px 16px; background:#0073aa; color:#fff; text-decoration:none; border-radius:3px; display:inline-block;">
+                📥 Download All Logs (CSV)
+            </a>
+        </div>
+        
+        <?php if ($total_logs > 0): ?>
+        
+        <!-- Top Pagination -->
+        <?php $this->renderPagination($current_page, $total_pages, $base_url); ?>
+        
         <div style="overflow-x:auto;">
             <table style="width:100%; margin:20px 0; border-collapse:collapse; font-size:13px;">
                 <thead>
@@ -587,34 +672,203 @@ class OSCBBAdmin {
                     </tr>
                 </thead>
                 <tbody>
-                    <?php foreach ($logs as $log): ?>
-                    <tr>
-                        <td style="padding:8px; border:1px solid #ddd; white-space:nowrap;">
-                            <?php echo date('Y-m-d H:i', strtotime($log['dt_date'])); ?>
-                        </td>
-                        <td style="padding:8px; border:1px solid #ddd;">
-                            <code><?php echo esc_html($log['s_ip']); ?></code>
-                        </td>
-                        <td style="padding:8px; border:1px solid #ddd; text-transform:capitalize;">
-                            <?php echo esc_html($log['s_type']); ?>
-                        </td>
-                        <td style="padding:8px; border:1px solid #ddd; max-width:300px;">
-                            <?php echo esc_html(substr($log['s_reason'], 0, 80)); ?>
-                        </td>
-                        <td style="padding:8px; border:1px solid #ddd; text-transform:capitalize;">
-                            <?php echo esc_html($log['s_form_type']); ?>
-                        </td>
-                    </tr>
-                    <?php endforeach; ?>
+                    <?php if (!empty($logs)): ?>
+                        <?php foreach ($logs as $log): ?>
+                        <tr>
+                            <td style="padding:8px; border:1px solid #ddd; white-space:nowrap;">
+                                <?php echo date('Y-m-d H:i', strtotime($log['dt_date'])); ?>
+                            </td>
+                            <td style="padding:8px; border:1px solid #ddd;">
+                                <code><?php echo htmlspecialchars($log['s_ip']); ?></code>
+                            </td>
+                            <td style="padding:8px; border:1px solid #ddd; text-transform:capitalize;">
+                                <?php echo htmlspecialchars($log['s_type']); ?>
+                            </td>
+                            <td style="padding:8px; border:1px solid #ddd; max-width:300px;">
+                                <?php echo htmlspecialchars(substr($log['s_reason'], 0, 80)); ?>
+                            </td>
+                            <td style="padding:8px; border:1px solid #ddd; text-transform:capitalize;">
+                                <?php echo htmlspecialchars($log['s_form_type']); ?>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    <?php else: ?>
+                        <tr>
+                            <td colspan="5" style="padding:20px; text-align:center; border:1px solid #ddd;">
+                                No logs found for this page.
+                            </td>
+                        </tr>
+                    <?php endif; ?>
                 </tbody>
             </table>
         </div>
+        
+        <!-- Bottom Pagination -->
+        <?php $this->renderPagination($current_page, $total_pages, $base_url); ?>
+        
         <?php else: ?>
         <p style="margin:30px 0; padding:20px; background:#e7f7e7; border-left:4px solid #00a32a;">
             <strong>No blocks recorded yet!</strong><br>
             Your site is spam-free! When spam is blocked, it will appear here.
         </p>
         <?php endif; ?>
+        <?php
+    }
+    
+    /**
+     * Download all logs as CSV file
+     */
+    public function downloadLogsCSV() {
+        $db = DBConnectionClass::newInstance();
+        $conn = $db->getOsclassDb();
+        $comm = new DBCommandClass($conn);
+        
+        // Get ALL logs (no limit)
+        $query = "SELECT * FROM " . OSCBB_TABLE_LOG . " 
+                  ORDER BY dt_date DESC";
+        
+        $result = $comm->query($query);
+        
+        // Set headers for CSV download
+        $filename = 'osc-bot-blocker-logs-' . date('Y-m-d-His') . '.csv';
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Pragma: no-cache');
+        header('Expires: 0');
+        
+        // Open output stream
+        $output = fopen('php://output', 'w');
+        
+        // Add UTF-8 BOM for Excel compatibility
+        fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
+        
+        // Write CSV header
+        fputcsv($output, array(
+            'ID',
+            'Date/Time',
+            'IP Address',
+            'User Agent',
+            'Type',
+            'Reason',
+            'Form Type',
+            'Email',
+            'Blocked'
+        ));
+        
+        // Write data rows
+        if ($result && $result->numRows() > 0) {
+            $logs = $result->result();
+            foreach ($logs as $log) {
+                fputcsv($output, array(
+                    $log['pk_i_id'],
+                    $log['dt_date'],
+                    $log['s_ip'],
+                    $log['s_user_agent'],
+                    $log['s_type'],
+                    $log['s_reason'],
+                    $log['s_form_type'],
+                    $log['s_email'],
+                    $log['s_blocked'] ? 'Yes' : 'No'
+                ));
+            }
+        }
+        
+        fclose($output);
+    }
+    
+    /**
+     * Clean up old logs from database
+     * 
+     * @param int $days Number of days to keep (0 = delete all)
+     * @return int|false Number of deleted rows, or false on error
+     */
+    private function cleanupLogs($days) {
+        $db = DBConnectionClass::newInstance();
+        $conn = $db->getOsclassDb();
+        $comm = new DBCommandClass($conn);
+        
+        if ($days === 0) {
+            // Delete ALL logs
+            $query = "DELETE FROM " . OSCBB_TABLE_LOG;
+        } else {
+            // Delete logs older than X days
+            $cutoff_date = date('Y-m-d H:i:s', strtotime("-{$days} days"));
+            $query = "DELETE FROM " . OSCBB_TABLE_LOG . " WHERE dt_date < '" . $conn->real_escape_string($cutoff_date) . "'";
+        }
+        
+        // Execute deletion
+        $result = $comm->query($query);
+        
+        if ($result) {
+            // Get number of affected rows
+            $affected = $conn->affected_rows;
+            return $affected;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Render pagination controls
+     * 
+     * @param int $current_page Current page number
+     * @param int $total_pages Total number of pages
+     * @param string $base_url Base URL for pagination links
+     */
+    private function renderPagination($current_page, $total_pages, $base_url) {
+        if ($total_pages <= 1) {
+            return; // No pagination needed
+        }
+        ?>
+        <div style="display:flex; justify-content:center; align-items:center; gap:5px; padding:15px 0;">
+            
+            <!-- Previous Button -->
+            <?php if ($current_page > 1): ?>
+                <a href="<?php echo $base_url . '&log_page=' . ($current_page - 1); ?>" 
+                   style="padding:8px 12px; background:#f0f0f0; border:1px solid #ddd; border-radius:3px; text-decoration:none; color:#333;">
+                    ← Previous
+                </a>
+            <?php else: ?>
+                <span style="padding:8px 12px; background:#f9f9f9; border:1px solid #e0e0e0; border-radius:3px; color:#999;">
+                    ← Previous
+                </span>
+            <?php endif; ?>
+            
+            <!-- Page Numbers -->
+            <?php
+            // Smart pagination - show first, last, current, and nearby pages
+            $range = 2; // Show 2 pages on each side of current
+            
+            for ($i = 1; $i <= $total_pages; $i++) {
+                // Always show first page, last page, current page, and nearby pages
+                if ($i == 1 || $i == $total_pages || ($i >= $current_page - $range && $i <= $current_page + $range)) {
+                    if ($i == $current_page) {
+                        // Current page - highlighted
+                        echo '<span style="padding:8px 12px; background:#0073aa; border:1px solid #0073aa; border-radius:3px; color:#fff; font-weight:bold;">' . $i . '</span>';
+                    } else {
+                        // Other pages - clickable
+                        echo '<a href="' . $base_url . '&log_page=' . $i . '" style="padding:8px 12px; background:#f0f0f0; border:1px solid #ddd; border-radius:3px; text-decoration:none; color:#333;">' . $i . '</a>';
+                    }
+                } elseif ($i == $current_page - $range - 1 || $i == $current_page + $range + 1) {
+                    // Show ellipsis for gaps
+                    echo '<span style="padding:8px 12px; color:#999;">...</span>';
+                }
+            }
+            ?>
+            
+            <!-- Next Button -->
+            <?php if ($current_page < $total_pages): ?>
+                <a href="<?php echo $base_url . '&log_page=' . ($current_page + 1); ?>" 
+                   style="padding:8px 12px; background:#f0f0f0; border:1px solid #ddd; border-radius:3px; text-decoration:none; color:#333;">
+                    Next →
+                </a>
+            <?php else: ?>
+                <span style="padding:8px 12px; background:#f9f9f9; border:1px solid #e0e0e0; border-radius:3px; color:#999;">
+                    Next →
+                </span>
+            <?php endif; ?>
+            
+        </div>
         <?php
     }
     
@@ -638,9 +892,14 @@ class OSCBBAdmin {
                 }
                 
                 if ($valid) {
+                    $conn = $db->getOsclassDb();
+                    $comm = new DBCommandClass($conn);
+                    $escaped_type = $conn->real_escape_string($type);
+                    $escaped_value = $conn->real_escape_string($value);
+                    
                     $query = "INSERT INTO " . OSCBB_TABLE_BLACKLIST . " (s_type, s_value, dt_added, s_reason, b_active) 
-                             VALUES ('" . esc_sql($type) . "', '" . esc_sql($value) . "', NOW(), 'Manual whitelist', 1)";
-                    $db->getOsclassDb()->exec($query);
+                             VALUES ('" . $escaped_type . "', '" . $escaped_value . "', NOW(), 'Manual whitelist', 1)";
+                    $comm->query($query);
                     osc_add_flash_ok_message('Entry added to whitelist!');
                 } else {
                     osc_add_flash_error_message('Invalid format.');
@@ -655,8 +914,10 @@ class OSCBBAdmin {
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && Params::getParam('action') === 'delete') {
             $id = (int)Params::getParam('entry_id');
             if ($id > 0) {
+                $conn = $db->getOsclassDb();
+                $comm = new DBCommandClass($conn);
                 $query = "DELETE FROM " . OSCBB_TABLE_BLACKLIST . " WHERE pk_i_id = " . $id;
-                $db->getOsclassDb()->exec($query);
+                $comm->query($query);
                 osc_add_flash_ok_message('Entry removed from whitelist!');
             }
             $url = osc_admin_render_plugin_url('osc_bot_blocker/admin.php') . '&tab=whitelist';
@@ -670,12 +931,12 @@ class OSCBBAdmin {
                   AND b_active = 1 
                   ORDER BY dt_added DESC";
         
-        $db_result = $db->getOsclassDb()->query($query);
+        $conn = $db->getOsclassDb();
+        $comm = new DBCommandClass($conn);
+        $db_result = $comm->query($query);
         $whitelist = array();
-        if ($db_result) {
-            while ($row = $db_result->fetch(PDO::FETCH_ASSOC)) {
-                $whitelist[] = $row;
-            }
+        if ($db_result && $db_result->numRows() > 0) {
+            $whitelist = $db_result->result();
         }
         ?>
         
@@ -722,7 +983,7 @@ class OSCBBAdmin {
                         <?php echo $entry['s_type'] === 'whitelist_ip' ? 'IP Address' : 'Email'; ?>
                     </td>
                     <td style="padding:10px; border:1px solid #ddd;">
-                        <code><?php echo esc_html($entry['s_value']); ?></code>
+                        <code><?php echo htmlspecialchars($entry['s_value']); ?></code>
                     </td>
                     <td style="padding:10px; border:1px solid #ddd;">
                         <?php echo date('Y-m-d H:i', strtotime($entry['dt_added'])); ?>
@@ -769,9 +1030,15 @@ class OSCBBAdmin {
                 if ($valid) {
                     if (empty($reason)) $reason = 'Custom blacklist';
                     
+                    $conn = $db->getOsclassDb();
+                    $comm = new DBCommandClass($conn);
+                    $escaped_type = $conn->real_escape_string($type);
+                    $escaped_value = $conn->real_escape_string($value);
+                    $escaped_reason = $conn->real_escape_string($reason);
+                    
                     $query = "INSERT INTO " . OSCBB_TABLE_BLACKLIST . " (s_type, s_value, dt_added, s_reason, b_active) 
-                             VALUES ('" . esc_sql($type) . "', '" . esc_sql($value) . "', NOW(), '" . esc_sql($reason) . "', 1)";
-                    $db->getOsclassDb()->exec($query);
+                             VALUES ('" . $escaped_type . "', '" . $escaped_value . "', NOW(), '" . $escaped_reason . "', 1)";
+                    $comm->query($query);
                     osc_add_flash_ok_message('Entry added to blacklist!');
                 } else {
                     osc_add_flash_error_message('Invalid format.');
@@ -786,8 +1053,10 @@ class OSCBBAdmin {
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && Params::getParam('action') === 'delete') {
             $id = (int)Params::getParam('entry_id');
             if ($id > 0) {
+                $conn = $db->getOsclassDb();
+                $comm = new DBCommandClass($conn);
                 $query = "DELETE FROM " . OSCBB_TABLE_BLACKLIST . " WHERE pk_i_id = " . $id;
-                $db->getOsclassDb()->exec($query);
+                $comm->query($query);
                 osc_add_flash_ok_message('Entry deleted!');
             }
             $url = osc_admin_render_plugin_url('osc_bot_blocker/admin.php') . '&tab=blacklist';
@@ -799,8 +1068,10 @@ class OSCBBAdmin {
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && Params::getParam('action') === 'toggle') {
             $id = (int)Params::getParam('entry_id');
             if ($id > 0) {
+                $conn = $db->getOsclassDb();
+                $comm = new DBCommandClass($conn);
                 $query = "UPDATE " . OSCBB_TABLE_BLACKLIST . " SET b_active = 1 - b_active WHERE pk_i_id = " . $id;
-                $db->getOsclassDb()->exec($query);
+                $comm->query($query);
                 osc_add_flash_ok_message('Entry status updated!');
             }
             $url = osc_admin_render_plugin_url('osc_bot_blocker/admin.php') . '&tab=blacklist';
@@ -813,12 +1084,12 @@ class OSCBBAdmin {
                   WHERE s_type IN ('blacklist_ip', 'blacklist_email', 'blacklist_keyword') 
                   ORDER BY b_active DESC, dt_added DESC";
         
-        $db_result = $db->getOsclassDb()->query($query);
+        $conn = $db->getOsclassDb();
+        $comm = new DBCommandClass($conn);
+        $db_result = $comm->query($query);
         $blacklist = array();
-        if ($db_result) {
-            while ($row = $db_result->fetch(PDO::FETCH_ASSOC)) {
-                $blacklist[] = $row;
-            }
+        if ($db_result && $db_result->numRows() > 0) {
+            $blacklist = $db_result->result();
         }
         ?>
         
@@ -875,13 +1146,13 @@ class OSCBBAdmin {
                         <?php endif; ?>
                     </td>
                     <td style="padding:10px; border:1px solid #ddd; text-transform:capitalize;">
-                        <?php echo esc_html(str_replace('blacklist_', '', $entry['s_type'])); ?>
+                        <?php echo htmlspecialchars(str_replace('blacklist_', '', $entry['s_type'])); ?>
                     </td>
                     <td style="padding:10px; border:1px solid #ddd;">
-                        <code><?php echo esc_html($entry['s_value']); ?></code>
+                        <code><?php echo htmlspecialchars($entry['s_value']); ?></code>
                     </td>
                     <td style="padding:10px; border:1px solid #ddd;">
-                        <?php echo esc_html($entry['s_reason'] ? $entry['s_reason'] : '-'); ?>
+                        <?php echo htmlspecialchars($entry['s_reason'] ? $entry['s_reason'] : '-'); ?>
                     </td>
                     <td style="padding:10px; border:1px solid #ddd;">
                         <?php echo date('Y-m-d H:i', strtotime($entry['dt_added'])); ?>
