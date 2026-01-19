@@ -5,10 +5,10 @@
  * Plugin Name: OSC Bot Blocker
  * Plugin URI: https://www.yoursite.com/osc-bot-blocker
  * Description: Advanced anti-spam and bot protection for osClass. Blocks spam in items, contact forms, user registration, and comments without CAPTCHAs.
- * Version: 1.2.1
+ * Version: 1.2.3
  * Author: Van Isle Web Solutions
  * Author URI: https://www.vanislebc.com
- * License: GPL3
+ * License: GPL2+
  * 
  * Requires osClass: Enterprise 3.10.4 or Ospoint 8.2.1
  * 
@@ -93,28 +93,171 @@ if (!defined('OSCBB_DEBUG')) {
 }
 
 /**
- * PLUGIN INITIALIZATION FUNCTION
- * This is called when the plugin is loaded
+ * PLUGIN INITIALIZATION - Load Required Classes
+ * This loads the classes but does NOT register hooks (hooks are registered below)
  */
-function oscbb_init() {
-    // Load IPValidator class file
-    if (file_exists(OSCBB_INCLUDES_PATH . 'IPValidator.class.php')) {
-        require_once OSCBB_INCLUDES_PATH . 'IPValidator.class.php';
-    }
-    
-    // Load ContentFilter class file
-    if (file_exists(OSCBB_INCLUDES_PATH . 'ContentFilter.class.php')) {
-        require_once OSCBB_INCLUDES_PATH . 'ContentFilter.class.php';
-    }
-    
-    // Load main class file
-    if (file_exists(OSCBB_INCLUDES_PATH . 'OSCBotBlocker.class.php')) {
-        require_once OSCBB_INCLUDES_PATH . 'OSCBotBlocker.class.php';
-    }
-    
-    // Initialize the plugin
+
+// Load IPValidator class file
+if (file_exists(OSCBB_INCLUDES_PATH . 'IPValidator.class.php')) {
+    require_once OSCBB_INCLUDES_PATH . 'IPValidator.class.php';
+}
+
+// Load ContentFilter class file
+if (file_exists(OSCBB_INCLUDES_PATH . 'ContentFilter.class.php')) {
+    require_once OSCBB_INCLUDES_PATH . 'ContentFilter.class.php';
+}
+
+// Load main class file
+if (file_exists(OSCBB_INCLUDES_PATH . 'OSCBotBlocker.class.php')) {
+    require_once OSCBB_INCLUDES_PATH . 'OSCBotBlocker.class.php';
+}
+
+/**
+ * Get plugin instance (helper function)
+ * @return OSCBotBlocker|null
+ */
+function oscbb_get_instance() {
     if (class_exists('OSCBotBlocker')) {
-        OSCBotBlocker::getInstance();
+        return OSCBotBlocker::getInstance();
+    }
+    return null;
+}
+
+/**
+ * Hook: Inject form protection into registration form
+ */
+function oscbb_hook_user_register_form() {
+    $instance = oscbb_get_instance();
+    if ($instance && $instance->isEnabled()) {
+        $instance->injectFormProtection();
+    }
+}
+
+/**
+ * Hook: Inject form protection into login form
+ */
+function oscbb_hook_user_login_form() {
+    $instance = oscbb_get_instance();
+    if ($instance && $instance->isEnabled()) {
+        $instance->injectFormProtection();
+    }
+}
+
+/**
+ * Hook: Inject form protection into contact forms
+ */
+function oscbb_hook_contact_form() {
+    $instance = oscbb_get_instance();
+    if ($instance && $instance->isEnabled()) {
+        $instance->injectFormProtection();
+    }
+}
+
+/**
+ * Hook: Inject form protection into admin contact form
+ */
+function oscbb_hook_admin_contact_form() {
+    $instance = oscbb_get_instance();
+    if ($instance && $instance->isEnabled()) {
+        $instance->injectFormProtection();
+    }
+}
+
+/**
+ * Hook: Inject form protection into item contact form
+ */
+function oscbb_hook_item_contact_form() {
+    $instance = oscbb_get_instance();
+    if ($instance && $instance->isEnabled()) {
+        $instance->injectFormProtection();
+    }
+}
+
+/**
+ * Hook: Inject global protection (JavaScript) in header
+ */
+function oscbb_hook_header() {
+    $instance = oscbb_get_instance();
+    if ($instance && $instance->isEnabled() && !OC_ADMIN) {
+        $instance->injectGlobalProtection();
+    }
+}
+
+/**
+ * Hook: Validate item submission
+ */
+function oscbb_hook_validate_item() {
+    $instance = oscbb_get_instance();
+    if ($instance && $instance->isEnabled()) {
+        $instance->validateItemSubmission();
+    }
+}
+
+/**
+ * Hook: Validate contact form submission
+ */
+function oscbb_hook_validate_contact() {
+    $instance = oscbb_get_instance();
+    if ($instance && $instance->isEnabled()) {
+        $instance->validateContactForm();
+    }
+}
+
+/**
+ * Hook: Validate registration submission
+ */
+function oscbb_hook_validate_registration() {
+    $instance = oscbb_get_instance();
+    if ($instance && $instance->isEnabled()) {
+        $instance->validateRegistration();
+    }
+}
+
+/**
+ * Hook: Validate comment submission
+ */
+function oscbb_hook_validate_comment() {
+    $instance = oscbb_get_instance();
+    if ($instance && $instance->isEnabled()) {
+        $instance->validateComment();
+    }
+}
+
+/**
+ * Hook: Daily cleanup cron job
+ */
+function oscbb_hook_daily_cleanup() {
+    $instance = oscbb_get_instance();
+    if ($instance) {
+        $instance->dailyCleanup();
+    }
+}
+
+/**
+ * Hook: Admin menu
+ */
+function oscbb_hook_admin_menu() {
+    if (!OC_ADMIN) {
+        return;
+    }
+    
+    $instance = oscbb_get_instance();
+    if ($instance) {
+        $instance->addAdminMenu();
+    }
+}
+
+/**
+ * Hook: Dashboard widget
+ */
+function oscbb_hook_dashboard_widget() {
+    if (!OC_ADMIN) {
+        return;
+    }
+    
+    $instance = oscbb_get_instance();
+    if ($instance && $instance->isEnabled()) {
+        $instance->renderDashboardWidget();
     }
 }
 
@@ -318,30 +461,40 @@ function osc_plugin_configure_osc_bot_blocker() {
 }
 
 /**
- * REGISTER THE PLUGIN
- * This tells osClass about the plugin
+ * REGISTER ALL HOOKS DIRECTLY (Like Avatar Plugin Does)
+ * osClass Enterprise 3.10.4 requires hooks to be registered directly in index.php
+ * NOT inside an init function
  */
-osc_register_plugin(osc_plugin_path(__FILE__), 'oscbb_init');
 
-/**
- * REGISTER INSTALL/UNINSTALL HOOKS
- */
+// INJECTION HOOKS - Add protection to forms when they're displayed
+osc_add_hook('user_register_form', 'oscbb_hook_user_register_form');
+osc_add_hook('user_login_form', 'oscbb_hook_user_login_form');
+osc_add_hook('contact_form', 'oscbb_hook_contact_form');
+osc_add_hook('admin_contact_form', 'oscbb_hook_admin_contact_form');
+osc_add_hook('item_contact_form', 'oscbb_hook_item_contact_form');
+osc_add_hook('header', 'oscbb_hook_header');
+
+// VALIDATION HOOKS - Validate submissions when forms are posted
+osc_add_hook('before_item_post', 'oscbb_hook_validate_item');
+osc_add_hook('pre_item_contact_post', 'oscbb_hook_validate_contact');
+osc_add_hook('before_user_register', 'oscbb_hook_validate_registration');
+osc_add_hook('pre_item_add_comment_post', 'oscbb_hook_validate_comment');
+
+// ADMIN HOOKS
+if (OC_ADMIN) {
+    osc_add_hook('admin_menu', 'oscbb_hook_admin_menu');
+	osc_add_hook('main_dashboard', 'oscbb_hook_dashboard_widget');           // Modern theme (Enterprise 3.10.4)
+    osc_add_hook('admin_dashboard_bottom', 'oscbb_hook_dashboard_widget');   // Omega theme (osClass 8.2.1)
+}
+
+// CRON HOOKS
+osc_add_hook('cron_daily', 'oscbb_hook_daily_cleanup');
+
+// PLUGIN LIFECYCLE HOOKS
 osc_add_hook(osc_plugin_path(__FILE__) . '_install', 'oscbb_install');
 osc_add_hook(osc_plugin_path(__FILE__) . '_uninstall', 'oscbb_uninstall');
 osc_add_hook(osc_plugin_path(__FILE__) . '_configure', 'osc_plugin_configure_osc_bot_blocker');
 
-/**
- * ADMIN MENU HOOK
- * Adds menu item to admin panel (will be implemented in Phase 3)
- */
-if (OC_ADMIN) {
-    osc_add_hook('admin_menu', 'oscbb_admin_menu');
-}
+// REGISTER THE PLUGIN (only for install function, NOT for init)
+osc_register_plugin(osc_plugin_path(__FILE__), 'oscbb_install');
 
-/**
- * ADMIN MENU FUNCTION (Placeholder for Phase 3)
- */
-function oscbb_admin_menu() {
-    // Will be implemented in Phase 3 (Step 23)
-    // For now, settings are accessible via plugin configure
-}

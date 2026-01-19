@@ -1,6 +1,6 @@
 # OSC Bot Blocker
 
-**Version:** 1.2.1  
+**Version:** 1.2.3  
 **Author:** Van Isle Web Solutions  
 **Website:** https://www.vanislebc.com/  
 **Requires:** osClass enterprise 3.10.4 or osClass 8.2.1+  
