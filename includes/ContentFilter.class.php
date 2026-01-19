@@ -11,7 +11,7 @@
  * @subpackage Classes
  * @author Van Isle Web Solutions
  * @link https://www.vanislebc.com/
- * @version 1.2.1
+ * @version 1.2.3
  */
 
 // Prevent direct access
@@ -435,6 +435,204 @@ class ContentFilter {
         
         // All checks passed
         return $result;
+    }
+	
+	/**
+     * Validate form submission fields for spam patterns
+     * Checks name, email, subject, and message for suspicious patterns
+     * 
+     * @param array $fields Array with keys: name, email, subject, message
+     * @return array ['valid' => bool, 'reason' => string]
+     */
+    public static function validateFormFields($fields) {
+        $name = isset($fields['name']) ? trim($fields['name']) : '';
+        $email = isset($fields['email']) ? trim($fields['email']) : '';
+        $subject = isset($fields['subject']) ? trim($fields['subject']) : '';
+        $message = isset($fields['message']) ? trim($fields['message']) : '';
+        
+        // Check 1: Random character detection in name
+        if (!empty($name)) {
+            if (self::isRandomCharacters($name)) {
+                return array(
+                    'valid' => false,
+                    'reason' => 'Spam detected: Random character pattern in name'
+                );
+            }
+        }
+        
+        // Check 2: Random character detection in subject
+        if (!empty($subject)) {
+            if (self::isRandomCharacters($subject)) {
+                return array(
+                    'valid' => false,
+                    'reason' => 'Spam detected: Random character pattern in subject'
+                );
+            }
+        }
+        
+        // Check 3: Suspicious Gmail patterns
+        if (!empty($email) && stripos($email, '@gmail.com') !== false) {
+            if (self::isSuspiciousGmailPattern($email)) {
+                return array(
+                    'valid' => false,
+                    'reason' => 'Spam detected: Suspicious Gmail address pattern'
+                );
+            }
+        }
+        
+        // Check 4: Multiple consecutive spaces (typo indicator)
+        if (!empty($subject) || !empty($message)) {
+            $text_to_check = $subject . ' ' . $message;
+            if (preg_match('/\s{3,}/', $text_to_check)) {
+                return array(
+                    'valid' => false,
+                    'reason' => 'Spam detected: Multiple consecutive spaces in content'
+                );
+            }
+        }
+        
+        // Check 5: Message is only gibberish
+        if (!empty($message)) {
+            if (self::isGibberish($message)) {
+                return array(
+                    'valid' => false,
+                    'reason' => 'Spam detected: Message contains only random characters'
+                );
+            }
+        }
+        
+        // All checks passed
+        return array('valid' => true, 'reason' => '');
+    }
+    
+    /**
+     * Detect random character patterns (mixed case gibberish)
+     * Example: "XXEScFiorLkuFsZwrIGtb"
+     * 
+     * @param string $text Text to analyze
+     * @return bool True if appears to be random characters
+     */
+    private static function isRandomCharacters($text) {
+        $text = trim($text);
+        
+        // Must be at least 10 characters to analyze
+        if (strlen($text) < 10) {
+            return false;
+        }
+        
+        // Count uppercase and lowercase letters
+        $uppercase = 0;
+        $lowercase = 0;
+        $length = strlen($text);
+        
+        for ($i = 0; $i < $length; $i++) {
+            $char = $text[$i];
+            if (ctype_upper($char)) {
+                $uppercase++;
+            } elseif (ctype_lower($char)) {
+                $lowercase++;
+            }
+        }
+        
+        // If we have both uppercase and lowercase
+        if ($uppercase > 0 && $lowercase > 0) {
+            $total_letters = $uppercase + $lowercase;
+            
+            // Random pattern: alternating case (more than 40% case changes)
+            $case_changes = 0;
+            for ($i = 1; $i < $length; $i++) {
+                if (ctype_alpha($text[$i]) && ctype_alpha($text[$i-1])) {
+                    if ((ctype_upper($text[$i]) && ctype_lower($text[$i-1])) ||
+                        (ctype_lower($text[$i]) && ctype_upper($text[$i-1]))) {
+                        $case_changes++;
+                    }
+                }
+            }
+            
+            // If more than 40% of letters have case changes = random
+            if ($total_letters > 0 && ($case_changes / $total_letters) > 0.4) {
+                return true;
+            }
+        }
+        
+        // Check for lack of vowels (gibberish often has few vowels)
+        $vowel_count = preg_match_all('/[aeiouAEIOU]/', $text);
+        $consonant_count = preg_match_all('/[bcdfghjklmnpqrstvwxyzBCDFGHJKLMNPQRSTVWXYZ]/', $text);
+        
+        // If less than 20% vowels in a word with 10+ letters = suspicious
+        if ($consonant_count > 0) {
+            $vowel_ratio = $vowel_count / ($vowel_count + $consonant_count);
+            if ($vowel_ratio < 0.2 && strlen($text) >= 10) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Detect suspicious Gmail address patterns
+     * Examples:
+     * - t.eka.l.udag6.41@gmail.com (excessive dots + numbers)
+     * - dinanikolskaya99@gmail.com (ends in multiple numbers)
+     * 
+     * @param string $email Email address
+     * @return bool True if suspicious pattern detected
+     */
+    private static function isSuspiciousGmailPattern($email) {
+        // Extract username part (before @)
+        $parts = explode('@', strtolower($email));
+        if (count($parts) != 2) {
+            return false;
+        }
+        
+        $username = $parts[0];
+        
+        // Pattern 1: More than 3 dots in username (t.eka.l.udag6.41)
+        // This is VERY unusual and likely obfuscation
+        $dot_count = substr_count($username, '.');
+        if ($dot_count > 3) {
+            return true;
+        }
+        
+        // Pattern 2: REMOVED - numbers at end are common and legitimate
+        // Many users have pmsmith601@gmail.com style addresses
+        
+        // Pattern 3: Combination of dots AND numbers at end (udag6.41)
+        // This specific pattern is suspicious
+        if (preg_match('/\.\d+\.\d+$/', $username)) {
+            return true;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Detect if entire message is gibberish
+     * Example: "pRYOONQQvytDyHcAoUFXNNVt"
+     * 
+     * @param string $text Message text
+     * @return bool True if appears to be gibberish
+     */
+    private static function isGibberish($text) {
+        $text = trim($text);
+        
+        // Skip if too short
+        if (strlen($text) < 15) {
+            return false;
+        }
+        
+        // Remove spaces and check if it's all one word of random chars
+        $no_spaces = str_replace(' ', '', $text);
+        
+        // If message is one long "word" with mixed case
+        if ($no_spaces == $text && strlen($text) > 20) {
+            if (self::isRandomCharacters($text)) {
+                return true;
+            }
+        }
+        
+        return false;
     }
     
     /**

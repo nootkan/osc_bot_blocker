@@ -8,7 +8,7 @@
  * @package OSCBotBlocker
  * @subpackage Classes
  * @author Your Name
- * @version 1.2.1
+ * @version 1.2.3
  */
 
 // Prevent direct access
@@ -63,10 +63,8 @@ class OSCBotBlocker {
         // Load configuration from preferences
         $this->loadConfig();
         
-        // Register hooks if plugin is enabled
-        if ($this->isEnabled()) {
-            $this->registerHooks();
-        }
+        // NOTE: Hooks are now registered directly in index.php (not here)
+        // This is required for osClass Enterprise 3.10.4 compatibility
     }
     
     /**
@@ -166,23 +164,45 @@ class OSCBotBlocker {
     
     /**
      * Register hooks for protection
-     * Hooks into osClass form submission points
+     * 
+     * DEPRECATED: This method is no longer used.
+     * Hooks are now registered directly in index.php for osClass Enterprise 3.10.4 compatibility.
+     * Kept for reference only.
      */
-    private function registerHooks() {
-        // Item posting hooks
-        osc_add_hook('post_item', array($this, 'injectFormProtection'), 10);
+    private function registerHooksOLD() {
+        // INJECTION HOOKS - These inject protection into forms when they're displayed
+        
+        // User registration form
+        osc_add_hook('user_register_form', array($this, 'injectFormProtection'), 10);
+        
+        // User login form
+        osc_add_hook('user_login_form', array($this, 'injectFormProtection'), 10);
+        
+        // Contact forms (public and admin)
+        osc_add_hook('contact_form', array($this, 'injectFormProtection'), 10);
+        osc_add_hook('admin_contact_form', array($this, 'injectFormProtection'), 10);
+        
+        // Item contact form (seller contact)
+        osc_add_hook('item_contact_form', array($this, 'injectFormProtection'), 10);
+        
+        // Item posting form (fallback - inject via header since no form hook exists)
+        osc_add_hook('header', array($this, 'injectGlobalProtection'), 1);
+        
+        // VALIDATION HOOKS - These validate submissions when forms are posted
+        
+        // Item posting validation
         osc_add_hook('before_item_post', array($this, 'validateItemSubmission'), 5);
         
-        // Contact form hooks
+        // Contact form validation
         osc_add_hook('pre_item_contact_post', array($this, 'validateContactForm'), 5);
         
-        // User registration hooks
+        // User registration validation
         osc_add_hook('before_user_register', array($this, 'validateRegistration'), 5);
         
-        // Comment hooks
+        // Comment validation
         osc_add_hook('pre_item_add_comment_post', array($this, 'validateComment'), 5);
         
-        // Admin hooks (for settings, will be used in Phase 3)
+        // Admin hooks (for settings)
         if (OC_ADMIN) {
             osc_add_hook('admin_menu', array($this, 'addAdminMenu'), 10);
         }
@@ -196,26 +216,66 @@ class OSCBotBlocker {
      * Called when forms are displayed
      */
     public function injectFormProtection() {
-        $this->debugLog('Form protection injection called');
+        // INJECTION GUARD: Prevent duplicate injection if hook is called multiple times
+        static $already_injected = false;
         
-        // Set session timestamp for form load time
-        $this->setFormLoadTime();
+        if ($already_injected) {
+            return;
+        }
         
-        // Generate and inject session token
-        $this->injectSessionToken();
+        try {
+            // Set session timestamp for form load time
+            $this->setFormLoadTime();
+            
+            // Generate and inject session token
+            $this->injectSessionToken();
+            
+            // Inject field name mappings for obfuscation
+            $this->injectFieldObfuscation();
+            
+            // Load JavaScript for bot detection
+            if ($this->config['js_enabled']) {
+                $this->enqueueJavaScript();
+            }
+            
+            // Inject honeypot fields
+            if ($this->config['honeypot_enabled']) {
+                $this->injectHoneypotFields();
+            }
+            
+            // Mark as injected to prevent duplicates
+            $already_injected = true;
+            
+        } catch (Exception $e) {
+            // Silent fail - don't break the form
+            if (OSCBB_DEBUG) {
+                error_log('OSCBB Error in injectFormProtection: ' . $e->getMessage());
+            }
+        } catch (Error $e) {
+            // Silent fail - don't break the form
+            if (OSCBB_DEBUG) {
+                error_log('OSCBB Fatal Error in injectFormProtection: ' . $e->getMessage());
+            }
+        }
+    }
+    
+    /**
+     * Inject global protection (JavaScript) in header
+     * Called on every page via header hook to ensure JavaScript is loaded
+     * This catches forms that don't have specific hooks (like item posting)
+     */
+    public function injectGlobalProtection() {
+        // Only inject on frontend (not admin)
+        if (OC_ADMIN) {
+            return;
+        }
         
-        // Inject field name mappings for obfuscation
-        $this->injectFieldObfuscation();
-        
-        // Load JavaScript for bot detection
+        // Load JavaScript for bot detection if enabled
         if ($this->config['js_enabled']) {
             $this->enqueueJavaScript();
         }
         
-        // Inject honeypot fields
-        if ($this->config['honeypot_enabled']) {
-            $this->injectHoneypotFields();
-        }
+        $this->debugLog('Global protection JavaScript injected via header hook');
     }
     
     /**
@@ -223,15 +283,20 @@ class OSCBotBlocker {
      * Used as backup for JavaScript time validation
      */
     private function setFormLoadTime() {
-        // Store current timestamp in session
-        Session::newInstance()->_set('oscbb_form_load_time', time());
+        // Ensure session is started
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        
+        // Store current timestamp in session using native PHP
+        $_SESSION['oscbb_form_load_time'] = time();
         
         // Also store in cookie as additional backup
         $cookie_name = 'oscbb_load_' . substr(md5(session_id()), 0, 8);
         $cookie_value = time();
         $expiry = time() + 3600; // 1 hour
         
-        setcookie($cookie_name, $cookie_value, $expiry, '/', '', true, true); // secure, httponly
+        setcookie($cookie_name, $cookie_value, $expiry, '/', '', false, true); // httponly
     }
     
     /**
@@ -239,20 +304,25 @@ class OSCBotBlocker {
      * Creates unique token per form load to prevent replay attacks
      */
     private function injectSessionToken() {
+        // Ensure session is started
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        
         // Generate unique session token
         $token = $this->generateSessionToken();
         
-        // Store token in session with expiration
+        // Store token in session with expiration using native PHP
         $token_data = array(
             'token' => $token,
             'created' => time(),
             'used' => false
         );
         
-        Session::newInstance()->_set('oscbb_session_token', $token_data);
+        $_SESSION['oscbb_session_token'] = $token_data;
         
         // Output hidden field with token
-        echo '<input type="hidden" name="oscbb_session_token" value="' . esc_attr($token) . '" />' . "\n";
+        echo '<input type="hidden" name="oscbb_session_token" value="' . htmlspecialchars($token, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
     }
     
     /**
@@ -281,6 +351,11 @@ class OSCBotBlocker {
      * Creates hidden field with mapping of obfuscated names to real names
      */
     private function injectFieldObfuscation() {
+        // Ensure session is started
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        
         // Generate daily rotation hash
         $date_hash = substr(md5(date('Ymd') . OSCBB_VERSION), 0, 8);
         
@@ -293,14 +368,14 @@ class OSCBotBlocker {
             'field_' . $date_hash . '_5' => 'subject',
         );
         
-        // Store in session
-        Session::newInstance()->_set('oscbb_field_map', $field_map);
+        // Store in session using native PHP
+        $_SESSION['oscbb_field_map'] = $field_map;
         
         // Output hidden field with encrypted mapping (for JavaScript to use)
         $map_json = json_encode($field_map);
         $map_encoded = base64_encode($map_json);
         
-        echo '<input type="hidden" name="oscbb_field_map" value="' . esc_attr($map_encoded) . '" />' . "\n";
+        echo '<input type="hidden" name="oscbb_field_map" value="' . htmlspecialchars($map_encoded, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
         
         $this->debugLog('Field obfuscation injected (hash: ' . $date_hash . ')');
     }
@@ -364,6 +439,12 @@ class OSCBotBlocker {
     public function validateContactForm($item = array()) {
         $this->debugLog('Contact form validation called');
         
+        // NEW: Validate form fields for spam patterns
+        $field_validation = $this->validateFormFields('contact');
+        if ($field_validation !== true) {
+            $this->blockSubmission($field_validation, 'contact');
+        }
+        
         // Run all validation checks
         $validation_result = $this->runAllValidations('contact');
         
@@ -406,6 +487,54 @@ class OSCBotBlocker {
         }
     }
     
+	/**
+     * Validate form field patterns for spam
+     * @param string $form_type Type of form
+     * @return mixed True if valid, error message if invalid
+     */
+    private function validateFormFields($form_type) {
+        // Load ContentFilter if not already loaded
+        if (!class_exists('ContentFilter')) {
+            require_once OSCBB_INCLUDES_PATH . 'ContentFilter.class.php';
+        }
+        
+        // Gather form fields
+        $fields = array();
+        
+        // Name field (various possible names)
+        $name = Params::getParam('yourName');
+        if (empty($name)) $name = Params::getParam('s_name');
+        if (empty($name)) $name = Params::getParam('name');
+        $fields['name'] = $name;
+        
+        // Email field
+        $email = Params::getParam('contactEmail');
+        if (empty($email)) $email = Params::getParam('s_email');
+        if (empty($email)) $email = Params::getParam('email');
+        $fields['email'] = $email;
+        
+        // Subject field
+        $subject = Params::getParam('subject');
+        if (empty($subject)) $subject = Params::getParam('s_subject');
+        $fields['subject'] = $subject;
+        
+        // Message field
+        $message = Params::getParam('message');
+        if (empty($message)) $message = Params::getParam('s_message');
+        $fields['message'] = $message;
+        
+        // Validate fields
+        $result = ContentFilter::validateFormFields($fields);
+        
+        if (!$result['valid']) {
+            $this->debugLog('Form field validation failed: ' . $result['reason']);
+            return $result['reason'];
+        }
+        
+        $this->debugLog('Form field validation passed');
+        return true;
+    }
+	
     /**
      * Run all validation checks
      * @param string $form_type Type of form (item, contact, register, comment)
@@ -517,28 +646,42 @@ class OSCBotBlocker {
         $time_window = 3600; // 1 hour in seconds
         $max_attempts = $this->config['rate_limit_count']; // Default: 5
         
-        // Query database for recent submissions from this IP
-        $query = sprintf(
-            "SELECT COUNT(*) as submission_count FROM %s 
-             WHERE s_ip = '%s' 
-             AND dt_date > DATE_SUB(NOW(), INTERVAL %d SECOND)
-             AND s_blocked = 0",
-            OSCBB_TABLE_LOG,
-            $this->db->escape($ip),
-            $time_window
-        );
-        
-        $result = $this->db->osc_dbFetchResult($query);
-        
-        if ($result && isset($result['submission_count'])) {
-            $count = (int)$result['submission_count'];
+        try {
+            // Get database connection
+            $conn = $this->db->getOsclassDb();
+            $comm = new DBCommandClass($conn);
+            $escaped_ip = $conn->real_escape_string($ip);
             
-            if ($count >= $max_attempts) {
-                $this->debugLog('Rate limit exceeded: ' . $count . ' submissions in last hour');
-                return 'Rate limit exceeded: Too many submissions. Please wait before trying again.';
+            // Query database for recent submissions from this IP
+            $query = sprintf(
+                "SELECT COUNT(*) as submission_count FROM %s 
+                 WHERE s_ip = '%s' 
+                 AND dt_date > DATE_SUB(NOW(), INTERVAL %d SECOND)
+                 AND s_blocked = 0",
+                OSCBB_TABLE_LOG,
+                $escaped_ip,
+                $time_window
+            );
+            
+            $result = $comm->query($query);
+            
+            if ($result) {
+                $row = $result->row();
+                if ($row && isset($row['submission_count'])) {
+                    $count = (int)$row['submission_count'];
+                    
+                    if ($count >= $max_attempts) {
+                        $this->debugLog('Rate limit exceeded: ' . $count . ' submissions in last hour');
+                        return 'Rate limit exceeded: Too many submissions. Please wait before trying again.';
+                    }
+                    
+                    $this->debugLog('Rate limit check passed: ' . $count . '/' . $max_attempts . ' submissions');
+                }
             }
-            
-            $this->debugLog('Rate limit check passed: ' . $count . '/' . $max_attempts . ' submissions');
+        } catch (Exception $e) {
+            // If rate limit check fails, allow submission but log error
+            $this->debugLog('Rate limit check error: ' . $e->getMessage());
+            return true;
         }
         
         return true;
@@ -551,6 +694,11 @@ class OSCBotBlocker {
      * @return mixed True if valid, error message if invalid
      */
     private function validateDuplicateContent($form_type) {
+        // Ensure session is started
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        
         // Get content hash
         $content = $this->getSubmittedContent();
         
@@ -561,8 +709,8 @@ class OSCBotBlocker {
         // Create hash of content
         $content_hash = md5($content);
         
-        // Store in session for this user
-        $recent_hashes = Session::newInstance()->_get('oscbb_content_hashes');
+        // Store in session for this user using native PHP
+        $recent_hashes = isset($_SESSION['oscbb_content_hashes']) ? $_SESSION['oscbb_content_hashes'] : null;
         
         if (!is_array($recent_hashes)) {
             $recent_hashes = array();
@@ -580,7 +728,7 @@ class OSCBotBlocker {
             array_shift($recent_hashes); // Remove oldest
         }
         
-        Session::newInstance()->_set('oscbb_content_hashes', $recent_hashes);
+        $_SESSION['oscbb_content_hashes'] = $recent_hashes;
         
         $this->debugLog('Duplicate check passed (hash: ' . $content_hash . ')');
         return true;
@@ -707,8 +855,11 @@ class OSCBotBlocker {
             return 'Field validation failed: Invalid field mapping';
         }
         
-        // Get expected map from session
-        $expected_map = Session::newInstance()->_get('oscbb_field_map');
+        // Get expected map from session using native PHP
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        $expected_map = isset($_SESSION['oscbb_field_map']) ? $_SESSION['oscbb_field_map'] : null;
         
         if (empty($expected_map) || !is_array($expected_map)) {
             // Session expired or missing
@@ -861,6 +1012,11 @@ class OSCBotBlocker {
      * @return mixed True if valid, error message if invalid
      */
     private function validateSessionToken() {
+        // Ensure session is started
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        
         // Get submitted token
         $submitted_token = Params::getParam('oscbb_session_token');
         
@@ -868,8 +1024,8 @@ class OSCBotBlocker {
             return 'Session validation failed: Token missing';
         }
         
-        // Get session token data
-        $token_data = Session::newInstance()->_get('oscbb_session_token');
+        // Get session token data using native PHP
+        $token_data = isset($_SESSION['oscbb_session_token']) ? $_SESSION['oscbb_session_token'] : null;
         
         if (empty($token_data) || !is_array($token_data)) {
             return 'Session validation failed: No session token found';
@@ -897,7 +1053,7 @@ class OSCBotBlocker {
         
         // Mark token as used to prevent replay
         $token_data['used'] = true;
-        Session::newInstance()->_set('oscbb_session_token', $token_data);
+        $_SESSION['oscbb_session_token'] = $token_data;
         
         // Token is valid
         $this->debugLog('Session token validation passed');
@@ -992,8 +1148,13 @@ class OSCBotBlocker {
      * @return mixed True if valid, error message if invalid
      */
     private function validateSessionTiming() {
-        // Get form load time from session
-        $load_time = Session::newInstance()->_get('oscbb_form_load_time');
+        // Ensure session is started
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        
+        // Get form load time from session using native PHP
+        $load_time = isset($_SESSION['oscbb_form_load_time']) ? $_SESSION['oscbb_form_load_time'] : null;
         
         if (empty($load_time)) {
             // No session data - check cookie backup
@@ -1032,8 +1193,8 @@ class OSCBotBlocker {
             return 'Time validation failed: Submission took too long (' . $submission_time . ' seconds)';
         }
         
-        // Clean up session data
-        Session::newInstance()->_drop('oscbb_form_load_time');
+        // Clean up session data using native PHP
+        unset($_SESSION['oscbb_form_load_time']);
         
         $this->debugLog('Session timing validation passed (submission time: ' . $submission_time . ' seconds)');
         return true;
@@ -1345,20 +1506,14 @@ class OSCBotBlocker {
     
     /**
      * Add admin menu item
+     * 
+     * Note: Admin interface is accessible via the Configure button on plugins page.
+     * This method is kept for future enhancement but does nothing currently.
      */
     public function addAdminMenu() {
-        if (!OC_ADMIN) {
-            return;
-        }
-        
-        // Load admin class
-        if (!class_exists('OSCBBAdmin')) {
-            require_once OSCBB_PATH . 'admin/OSCBBAdmin.class.php';
-        }
-        
-        // Get admin instance and add menu
-        $admin = OSCBBAdmin::getInstance();
-        $admin->addAdminMenu();
+        // Admin interface already accessible via Configure button
+        // Future: Could add a dedicated menu item here if needed
+        return;
     }
     
     /**
@@ -1376,8 +1531,13 @@ class OSCBotBlocker {
      * Removes old/expired tokens from session storage
      */
     private function cleanExpiredSessions() {
-        // Clean up any expired session tokens
-        $token_data = Session::newInstance()->_get('oscbb_session_token');
+        // Ensure session is started
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        
+        // Clean up any expired session tokens using native PHP
+        $token_data = isset($_SESSION['oscbb_session_token']) ? $_SESSION['oscbb_session_token'] : null;
         
         if (!empty($token_data) && is_array($token_data)) {
             if (isset($token_data['created'])) {
@@ -1385,19 +1545,19 @@ class OSCBotBlocker {
                 
                 // Remove if older than max_submit_time
                 if ($token_age > $this->config['max_submit_time']) {
-                    Session::newInstance()->_drop('oscbb_session_token');
+                    unset($_SESSION['oscbb_session_token']);
                     $this->debugLog('Cleaned expired session token');
                 }
             }
         }
         
-        // Clean up form load time if expired
-        $load_time = Session::newInstance()->_get('oscbb_form_load_time');
+        // Clean up form load time if expired using native PHP
+        $load_time = isset($_SESSION['oscbb_form_load_time']) ? $_SESSION['oscbb_form_load_time'] : null;
         if (!empty($load_time)) {
             $load_age = time() - $load_time;
             
             if ($load_age > $this->config['max_submit_time']) {
-                Session::newInstance()->_drop('oscbb_form_load_time');
+                unset($_SESSION['oscbb_form_load_time']);
                 $this->debugLog('Cleaned expired form load time');
             }
         }
@@ -1528,10 +1688,18 @@ class OSCBotBlocker {
             $comm = new DBCommandClass($conn);
             
             $today = date('Y-m-d');
+            $escaped_today = $conn->real_escape_string($today);
             
             // Check if today's record exists
-            $sql = "SELECT pk_i_id FROM " . OSCBB_TABLE_STATS . " WHERE dt_date = '" . $today . "'";
+            $sql = "SELECT pk_i_id FROM " . OSCBB_TABLE_STATS . " WHERE dt_date = '" . $escaped_today . "'";
             $result = $comm->query($sql);
+            
+            // Check if query was successful
+            if ($result === false) {
+                $this->debugLog('Statistics query failed - table may not exist');
+                return false;
+            }
+            
             $row = $result->row();
             
             if ($row) {
@@ -1565,7 +1733,7 @@ class OSCBotBlocker {
                     $sql .= ", " . $update_field . " = " . $update_field . " + 1";
                 }
                 
-                $sql .= " WHERE dt_date = '" . $today . "'";
+                $sql .= " WHERE dt_date = '" . $escaped_today . "'";
                 
                 $comm->query($sql);
                 
@@ -1653,6 +1821,165 @@ class OSCBotBlocker {
     public function debugLog($message) {
         if (OSCBB_DEBUG) {
             error_log('OSC Bot Blocker: ' . $message);
+        }
+    }
+	
+	/**
+     * Render dashboard widget showing recent bot blocks
+     * Called via admin_dashboard_top hook
+     */
+    public function renderDashboardWidget() {
+        // Only show on dashboard and if logging is enabled
+        if (!$this->config['logging_enabled']) {
+            return;
+        }
+        
+        try {
+            $db = DBConnectionClass::newInstance();
+            $conn = $db->getOsclassDb();
+            $comm = new DBCommandClass($conn);
+            
+            // Get summary statistics
+            $today = date('Y-m-d');
+            $week_ago = date('Y-m-d', strtotime('-7 days'));
+            
+            $stats_query = "SELECT 
+                                COUNT(CASE WHEN DATE(dt_date) = '$today' THEN 1 END) as today,
+                                COUNT(CASE WHEN DATE(dt_date) >= '$week_ago' THEN 1 END) as week,
+                                COUNT(*) as total
+                            FROM " . OSCBB_TABLE_LOG . " 
+                            WHERE s_blocked = 1";
+            
+            $stats_result = $comm->query($stats_query);
+            $stats = array('today' => 0, 'week' => 0, 'total' => 0);
+            
+            if ($stats_result) {
+                $stats_row = $stats_result->row();
+                if ($stats_row) {
+                    $stats['today'] = (int)$stats_row['today'];
+                    $stats['week'] = (int)$stats_row['week'];
+                    $stats['total'] = (int)$stats_row['total'];
+                }
+            }
+            
+            // Get recent blocks (last 15)
+            $logs_query = "SELECT * FROM " . OSCBB_TABLE_LOG . " 
+                          WHERE s_blocked = 1 
+                          ORDER BY dt_date DESC 
+                          LIMIT 15";
+            
+            $logs_result = $comm->query($logs_query);
+            $recent_blocks = array();
+            
+            if ($logs_result && $logs_result->numRows() > 0) {
+                $recent_blocks = $logs_result->result();
+            }
+            
+            // Render widget HTML
+            ?>
+            <div class="grid-row grid-100">
+                <div class="row-wrapper">
+                    <div class="widget-box">
+                        <div class="widget-box-title">
+                            <h3>
+                                <span><?php _e('Bot Blocker Activity'); ?></span>
+                            </h3>
+                        </div>
+                        <div class="widget-box-content">
+                            
+                            <!-- Summary Statistics -->
+                            <div class="row st">
+                                <?php echo sprintf(__('Blocked in last 24 hours: %s'), '<strong>' . number_format($stats['today']) . '</strong>'); ?>
+                            </div>
+                            
+                            <div class="row st">
+                                <?php echo sprintf(__('Blocked in last 7 days: %s'), '<strong>' . number_format($stats['week']) . '</strong>'); ?>
+                            </div>
+                            
+                            <div class="row st">
+                                <?php echo sprintf(__('Overall blocked: %s'), '<strong>' . number_format($stats['total']) . '</strong>'); ?>
+                            </div>
+                            
+                            <div class="row"></div>
+                            
+                            <h4><?php _e('Recently blocked'); ?></h4>
+                            
+                            <?php if (count($recent_blocks) <= 0) { ?>
+                                <div class="empty"><?php _e('No spam blocked yet - your site is clean!'); ?></div>
+                            <?php } else { ?>
+                                <?php foreach ($recent_blocks as $block) { 
+                                    // Determine status class and title based on block type
+                                    $block_type = $block['s_type'];
+                                    $form_type = $block['s_form_type'];
+                                    
+                                    switch($block_type) {
+                                        case 'bot':
+                                            $class = 'spam';
+                                            $title = __('Bot Detected');
+                                            break;
+                                        case 'spam':
+                                            $class = 'spam';
+                                            $title = __('Spam Content');
+                                            break;
+                                        case 'honeypot':
+                                            $class = 'blocked';
+                                            $title = __('Honeypot Trap');
+                                            break;
+                                        case 'javascript':
+                                            $class = 'inactive';
+                                            $title = __('JS Validation Failed');
+                                            break;
+                                        case 'rate_limit':
+                                            $class = 'moderation';
+                                            $title = __('Rate Limit Exceeded');
+                                            break;
+                                        case 'content':
+                                            $class = 'spam';
+                                            $title = __('Content Filter');
+                                            break;
+                                        default:
+                                            $class = 'blocked';
+                                            $title = __('Blocked');
+                                    }
+                                    
+                                    // Create display text
+                                    $display_text = sprintf(
+                                        __('%s attempt from %s'),
+                                        ucfirst($form_type),
+                                        substr($block['s_ip'], 0, 15)
+                                    );
+                                ?>
+                                    <div class="row">
+                                        <span class="date"><?php echo osc_format_date($block['dt_date'], 'd M, H:i'); ?></span>
+                                        <i class="fa fa-circle <?php echo $class; ?>" title="<?php echo osc_esc_html($title); ?>"></i>
+                                        <span title="<?php echo osc_esc_html($block['s_reason']); ?>">
+                                            <?php echo osc_esc_html($display_text); ?>
+                                        </span>
+                                    </div>
+                                <?php } ?>
+                                
+                                <!-- Link to full logs -->
+                                <div class="row" style="margin-top: 15px; padding-top: 10px; border-top: 1px solid #e0e0e0;">
+                                    <a href="<?php echo osc_admin_render_plugin_url('osc_bot_blocker/admin.php') . '&tab=logs'; ?>" class="btn">
+                                        <?php _e('View All Logs'); ?>
+                                    </a>
+                                    <a href="<?php echo osc_admin_render_plugin_url('osc_bot_blocker/admin.php') . '&tab=statistics'; ?>" class="btn" style="margin-left: 10px;">
+                                        <?php _e('View Statistics'); ?>
+                                    </a>
+                                </div>
+                            <?php } ?>
+                            
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <?php
+            
+        } catch (Exception $e) {
+            // Silent fail - don't break dashboard
+            if (OSCBB_DEBUG) {
+                error_log('OSCBB Dashboard Widget Error: ' . $e->getMessage());
+            }
         }
     }
 }
