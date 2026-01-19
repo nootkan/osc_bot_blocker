@@ -296,8 +296,11 @@ class OSCBotBlocker {
         $cookie_value = time();
         $expiry = time() + 3600; // 1 hour
         
-        setcookie($cookie_name, $cookie_value, $expiry, '/', '', false, true); // httponly
-    }
+        // Set secure flag based on HTTPS usage
+        $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || 
+                  (!empty($_SERVER['SERVER_PORT']) && $_SERVER['SERVER_PORT'] == 443);
+        
+        setcookie($cookie_name, $cookie_value, $expiry, '/', '', $secure, true);
     
     /**
      * Generate and inject session token field
