@@ -301,6 +301,7 @@ class OSCBotBlocker {
                   (!empty($_SERVER['SERVER_PORT']) && $_SERVER['SERVER_PORT'] == 443);
         
         setcookie($cookie_name, $cookie_value, $expiry, '/', '', $secure, true);
+	}
     
     /**
      * Generate and inject session token field
@@ -1785,7 +1786,7 @@ class OSCBotBlocker {
             $comm->query($sql);
             
             // Get number of affected rows
-            $deleted = $conn->affected_rows();
+            $deleted = $conn->affected_rows;
             
             if (OSCBB_DEBUG && $deleted > 0) {
                 error_log('OSC Bot Blocker: Cleaned ' . $deleted . ' old log entries');
