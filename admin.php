@@ -52,9 +52,15 @@ if (!function_exists('osc_create_nonce')) {
         if (function_exists('osc_csrf_token_url')) {
             return osc_csrf_token_url();
         }
-        // Fallback: create simple token
+        // Fallback: create cryptographically secure token
         if (!isset($_SESSION['oscbb_token'])) {
-            $_SESSION['oscbb_token'] = md5(uniqid(rand(), true));
+            // Use PHP's secure random function (PHP 7+)
+            if (function_exists('random_bytes')) {
+                $_SESSION['oscbb_token'] = bin2hex(random_bytes(32));
+            } else {
+                // Fallback for older PHP (use SHA-256 instead of MD5)
+                $_SESSION['oscbb_token'] = hash('sha256', uniqid(mt_rand(), true) . microtime(true));
+            }
         }
         return $_SESSION['oscbb_token'];
     }
