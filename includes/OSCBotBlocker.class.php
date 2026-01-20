@@ -118,8 +118,9 @@ class OSCBotBlocker {
         // Cookie testing
         $this->config['cookie_test_enabled'] = (osc_get_preference('oscbb_cookie_test_enabled', 'osc_bot_blocker') == '1');
         
-        // Content filtering
-        $this->config['url_limit'] = (int)osc_get_preference('oscbb_url_limit', 'osc_bot_blocker');
+        // Content filtering$url_pref = osc_get_preference('oscbb_url_limit', 'osc_bot_blocker');
+        $url_pref = osc_get_preference('oscbb_url_limit', 'osc_bot_blocker');
+        $this->config['url_limit'] = ($url_pref !== null) ? (int)$url_pref : 3;
         $this->config['keyword_filter_enabled'] = (osc_get_preference('oscbb_keyword_filter_enabled', 'osc_bot_blocker') == '1');
         
         // Email protection
@@ -147,9 +148,6 @@ class OSCBotBlocker {
         }
         if (empty($this->config['token_expiration'])) {
             $this->config['token_expiration'] = 3600;
-        }
-        if (empty($this->config['url_limit'])) {
-            $this->config['url_limit'] = 3;
         }
         if (empty($this->config['rate_limit_count'])) {
             $this->config['rate_limit_count'] = 5;
