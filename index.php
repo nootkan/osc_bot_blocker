@@ -476,7 +476,7 @@ osc_add_hook('header', 'oscbb_hook_header');
 
 // VALIDATION HOOKS - Validate submissions when forms are posted
 osc_add_hook('before_item_post', 'oscbb_hook_validate_item');
-osc_add_hook('pre_item_contact_post', 'oscbb_hook_validate_contact');
+osc_add_hook('pre_contact_post', 'oscbb_hook_validate_contact');
 osc_add_hook('before_user_register', 'oscbb_hook_validate_registration');
 osc_add_hook('pre_item_add_comment_post', 'oscbb_hook_validate_comment');
 
