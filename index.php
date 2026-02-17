@@ -5,7 +5,7 @@
  * Plugin Name: OSC Bot Blocker
  * Plugin URI: https://www.yoursite.com/osc-bot-blocker
  * Description: Advanced anti-spam and bot protection for osClass. Blocks spam in items, contact forms, user registration, and comments without CAPTCHAs.
- * Version: 1.2.3
+ * Version: 1.3.0
  * Author: Van Isle Web Solutions
  * Author URI: https://www.vanislebc.com
  * License: GPL2+
@@ -37,7 +37,7 @@ if (!defined('ABS_PATH')) {
 
 // Plugin version
 if (!defined('OSCBB_VERSION')) {
-    define('OSCBB_VERSION', '1.0.0');
+    define('OSCBB_VERSION', '1.3.0');
 }
 
 // Plugin path constants
@@ -269,6 +269,9 @@ function oscbb_install() {
     // Create database tables
     oscbb_create_tables();
     
+    // Migrate existing tables if upgrading
+    oscbb_migrate_tables();
+    
     // Set default preferences
     oscbb_set_default_preferences();
     
@@ -308,7 +311,7 @@ function oscbb_create_tables() {
     $db = $conn->getOsclassDb();
     $comm = new DBCommandClass($db);
     
-    // Table 1: Log table
+    // Table 1: Enhanced Log table with analytics fields
     $sql_log = "CREATE TABLE IF NOT EXISTS " . OSCBB_TABLE_LOG . " (
         pk_i_id INT(10) UNSIGNED NOT NULL AUTO_INCREMENT,
         dt_date DATETIME NOT NULL,
@@ -319,11 +322,31 @@ function oscbb_create_tables() {
         s_form_type ENUM('item', 'contact', 'register', 'comment', 'other') NOT NULL DEFAULT 'other',
         s_email VARCHAR(255),
         s_blocked TINYINT(1) DEFAULT 1,
+        
+        -- Enhanced logging fields for analytics (v1.3.0)
+        s_content_hash VARCHAR(64),
+        s_content_length INT,
+        i_url_count INT DEFAULT 0,
+        i_keyword_matches INT DEFAULT 0,
+        s_matched_keywords TEXT,
+        i_submit_time INT,
+        i_field_count INT DEFAULT 0,
+        s_browser_language VARCHAR(10),
+        s_email_domain VARCHAR(255),
+        i_content_languages INT DEFAULT 0,
+        b_has_links TINYINT(1) DEFAULT 0,
+        b_all_caps TINYINT(1) DEFAULT 0,
+        i_hour_of_day TINYINT,
+        i_day_of_week TINYINT,
+        
         PRIMARY KEY (pk_i_id),
         KEY idx_date (dt_date),
         KEY idx_ip (s_ip),
         KEY idx_type (s_type),
-        KEY idx_form_type (s_form_type)
+        KEY idx_form_type (s_form_type),
+        KEY idx_content_hash (s_content_hash),
+        KEY idx_email_domain (s_email_domain),
+        KEY idx_hour_day (i_hour_of_day, i_day_of_week)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8;";
     
     // Table 2: Statistics table
@@ -344,7 +367,7 @@ function oscbb_create_tables() {
     // Table 3: Blacklist table
     $sql_blacklist = "CREATE TABLE IF NOT EXISTS " . OSCBB_TABLE_BLACKLIST . " (
         pk_i_id INT(10) UNSIGNED NOT NULL AUTO_INCREMENT,
-        s_type ENUM('ip', 'email', 'domain', 'keyword') NOT NULL,
+        s_type ENUM('ip', 'email', 'domain', 'keyword', 'whitelist_ip', 'whitelist_email', 'blacklist_ip', 'blacklist_email', 'blacklist_keyword') NOT NULL,
         s_value VARCHAR(255) NOT NULL,
         dt_added DATETIME NOT NULL,
         s_reason VARCHAR(500),
@@ -363,6 +386,66 @@ function oscbb_create_tables() {
     } catch (Exception $e) {
         if (OSCBB_DEBUG) {
             error_log('OSC Bot Blocker: Error creating tables - ' . $e->getMessage());
+        }
+        return false;
+    }
+}
+
+/**
+ * MIGRATE EXISTING TABLES
+ * Adds new columns to existing tables when upgrading
+ */
+function oscbb_migrate_tables() {
+    $conn = DBConnectionClass::newInstance();
+    $db = $conn->getOsclassDb();
+    $comm = new DBCommandClass($db);
+    
+    try {
+        // Check if enhanced logging columns exist
+        $result = $comm->query("SHOW COLUMNS FROM " . OSCBB_TABLE_LOG . " LIKE 's_content_hash'");
+        
+        if (!$result || $result->numRows() == 0) {
+            // Columns don't exist, add them
+            $migrations = array(
+                "ALTER TABLE " . OSCBB_TABLE_LOG . " ADD COLUMN s_content_hash VARCHAR(64) AFTER s_blocked",
+                "ALTER TABLE " . OSCBB_TABLE_LOG . " ADD COLUMN s_content_length INT AFTER s_content_hash",
+                "ALTER TABLE " . OSCBB_TABLE_LOG . " ADD COLUMN i_url_count INT DEFAULT 0 AFTER s_content_length",
+                "ALTER TABLE " . OSCBB_TABLE_LOG . " ADD COLUMN i_keyword_matches INT DEFAULT 0 AFTER i_url_count",
+                "ALTER TABLE " . OSCBB_TABLE_LOG . " ADD COLUMN s_matched_keywords TEXT AFTER i_keyword_matches",
+                "ALTER TABLE " . OSCBB_TABLE_LOG . " ADD COLUMN i_submit_time INT AFTER s_matched_keywords",
+                "ALTER TABLE " . OSCBB_TABLE_LOG . " ADD COLUMN i_field_count INT DEFAULT 0 AFTER i_submit_time",
+                "ALTER TABLE " . OSCBB_TABLE_LOG . " ADD COLUMN s_browser_language VARCHAR(10) AFTER i_field_count",
+                "ALTER TABLE " . OSCBB_TABLE_LOG . " ADD COLUMN s_email_domain VARCHAR(255) AFTER s_browser_language",
+                "ALTER TABLE " . OSCBB_TABLE_LOG . " ADD COLUMN i_content_languages INT DEFAULT 0 AFTER s_email_domain",
+                "ALTER TABLE " . OSCBB_TABLE_LOG . " ADD COLUMN b_has_links TINYINT(1) DEFAULT 0 AFTER i_content_languages",
+                "ALTER TABLE " . OSCBB_TABLE_LOG . " ADD COLUMN b_all_caps TINYINT(1) DEFAULT 0 AFTER b_has_links",
+                "ALTER TABLE " . OSCBB_TABLE_LOG . " ADD COLUMN i_hour_of_day TINYINT AFTER b_all_caps",
+                "ALTER TABLE " . OSCBB_TABLE_LOG . " ADD COLUMN i_day_of_week TINYINT AFTER i_hour_of_day",
+                "ALTER TABLE " . OSCBB_TABLE_LOG . " ADD KEY idx_content_hash (s_content_hash)",
+                "ALTER TABLE " . OSCBB_TABLE_LOG . " ADD KEY idx_email_domain (s_email_domain)",
+                "ALTER TABLE " . OSCBB_TABLE_LOG . " ADD KEY idx_hour_day (i_hour_of_day, i_day_of_week)"
+            );
+            
+            foreach ($migrations as $sql) {
+                try {
+                    $comm->query($sql);
+                } catch (Exception $e) {
+                    // Column might already exist or other error - log it but continue
+                    if (OSCBB_DEBUG) {
+                        error_log('OSC Bot Blocker Migration: ' . $e->getMessage());
+                    }
+                }
+            }
+            
+            if (OSCBB_DEBUG) {
+                error_log('OSC Bot Blocker: Enhanced logging columns added successfully');
+            }
+        }
+        
+        return true;
+    } catch (Exception $e) {
+        if (OSCBB_DEBUG) {
+            error_log('OSC Bot Blocker: Error during migration - ' . $e->getMessage());
         }
         return false;
     }
@@ -432,6 +515,9 @@ function oscbb_set_default_preferences() {
     osc_set_preference('oscbb_logging_enabled', '1', 'osc_bot_blocker', 'BOOLEAN');
     osc_set_preference('oscbb_log_retention_days', '30', 'osc_bot_blocker', 'INTEGER');
     
+    // Enhanced logging (v1.3.0)
+    osc_set_preference('oscbb_enhanced_logging_enabled', '1', 'osc_bot_blocker', 'BOOLEAN');
+    
     // Uninstall options
     osc_set_preference('oscbb_keep_data_on_uninstall', '0', 'osc_bot_blocker', 'BOOLEAN');
 }
@@ -483,12 +569,12 @@ osc_add_hook('pre_item_add_comment_post', 'oscbb_hook_validate_comment');
 // ADMIN HOOKS
 if (OC_ADMIN) {
     osc_add_hook('admin_menu', 'oscbb_hook_admin_menu');
-	osc_add_hook('main_dashboard', 'oscbb_hook_dashboard_widget');           // Modern theme (Enterprise 3.10.4)
+    osc_add_hook('main_dashboard', 'oscbb_hook_dashboard_widget');           // Modern theme (Enterprise 3.10.4)
     osc_add_hook('admin_dashboard_bottom', 'oscbb_hook_dashboard_widget');   // Omega theme (osClass 8.2.1)
 }
 
 // CRON HOOKS
-osc_add_hook('cron_daily', 'oscbb_hook_daily_cleanup');
+osc_add_hook('cron_hourly', 'oscbb_hook_daily_cleanup');
 
 // PLUGIN LIFECYCLE HOOKS
 osc_add_hook(osc_plugin_path(__FILE__) . '_install', 'oscbb_install');
@@ -497,4 +583,3 @@ osc_add_hook(osc_plugin_path(__FILE__) . '_configure', 'osc_plugin_configure_osc
 
 // REGISTER THE PLUGIN (only for install function, NOT for init)
 osc_register_plugin(osc_plugin_path(__FILE__), 'oscbb_install');
-
