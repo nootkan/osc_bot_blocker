@@ -59,7 +59,10 @@ try {
     error_log($message);
     
 } catch (Exception $e) {
-    $error = 'OSC Bot Blocker: Cron cleanup error - ' . $e->getMessage();
-    echo $error;
-    error_log($error);
+    // Log detailed error for admin debugging
+    error_log('OSC Bot Blocker: Cron cleanup error - ' . $e->getMessage());
+    error_log('Stack trace: ' . $e->getTraceAsString());
+    
+    // Display generic error message (no sensitive details)
+    echo 'OSC Bot Blocker: Cron cleanup failed. Check server error log for details.';
 }
