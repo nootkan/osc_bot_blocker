@@ -8,7 +8,7 @@
  * @package OSCBotBlocker
  * @subpackage Classes
  * @author Your Name
- * @version 1.2.3
+ * @version 1.3.0
  */
 
 // Prevent direct access
@@ -290,7 +290,7 @@ class OSCBotBlocker {
         $_SESSION['oscbb_form_load_time'] = time();
         
         // Also store in cookie as additional backup
-        $cookie_name = 'oscbb_load_' . substr(md5(session_id()), 0, 8);
+        $cookie_name = 'oscbb_load_' . substr(hash('sha256', session_id()), 0, 8);
         $cookie_value = time();
         $expiry = time() + 3600; // 1 hour
         
@@ -359,7 +359,7 @@ class OSCBotBlocker {
         }
         
         // Generate daily rotation hash
-        $date_hash = substr(md5(date('Ymd') . OSCBB_VERSION), 0, 8);
+        $date_hash = substr(hash('sha256', date('Ymd') . OSCBB_VERSION), 0, 8);
         
         // Create field mapping (obfuscated => real)
         $field_map = array(
@@ -396,7 +396,7 @@ class OSCBotBlocker {
      */
     private function injectHoneypotFields() {
         // Generate unique field names using hash to make them harder to detect
-        $hash = substr(md5(OSCBB_VERSION . date('Ymd')), 0, 8);
+        $hash = substr(hash('sha256', OSCBB_VERSION . date('Ymd')), 0, 8);
         $field1_name = 'user_' . $hash;
         $field2_name = 'website_' . $hash;
         $field3_name = 'comment_' . $hash;
@@ -709,7 +709,7 @@ class OSCBotBlocker {
         }
         
         // Create hash of content
-        $content_hash = md5($content);
+        $content_hash = hash('sha256', $content);
         
         // Store in session for this user using native PHP
         $recent_hashes = isset($_SESSION['oscbb_content_hashes']) ? $_SESSION['oscbb_content_hashes'] : null;
@@ -1251,7 +1251,7 @@ class OSCBotBlocker {
      */
     private function validateHoneypot() {
         // Generate the same field names used in injection
-        $hash = substr(md5(OSCBB_VERSION . date('Ymd')), 0, 8);
+        $hash = substr(hash('sha256', OSCBB_VERSION . date('Ymd')), 0, 8);
         $field1_name = 'user_' . $hash;
         $field2_name = 'website_' . $hash;
         $field3_name = 'comment_' . $hash;
@@ -1523,6 +1523,7 @@ class OSCBotBlocker {
      * Cleans old logs and expired session data
      */
     public function dailyCleanup() {
+		error_log('OSC Bot Blocker: dailyCleanup() method was called at ' . date('Y-m-d H:i:s'));
         $this->cleanOldLogs();
         $this->cleanExpiredSessions();
         $this->debugLog('Daily cleanup completed');
@@ -1631,6 +1632,268 @@ class OSCBotBlocker {
     }
     
     /**
+     * ENHANCED LOGGING METHODS (v1.3.0)
+     * These methods extract additional analytics data for improved spam pattern recognition
+     */
+    
+    /**
+     * Extract and analyze content for enhanced logging
+     * @return array Analytics data
+     */
+    private function extractEnhancedData() {
+        // Check if enhanced logging is enabled
+        $enhanced_enabled = osc_get_preference('oscbb_enhanced_logging_enabled', 'osc_bot_blocker');
+        if ($enhanced_enabled != '1') {
+            return array(); // Return empty if not enabled
+        }
+        
+        $data = array();
+        
+        // Get content from submission
+        $content = $this->getSubmittedContent();
+        
+        // Content hash (for duplicate detection)
+        $data['s_content_hash'] = !empty($content) ? hash('sha256', $content) : null;
+        
+        // Content length
+        $data['s_content_length'] = !empty($content) ? strlen($content) : 0;
+        
+        // URL count
+        if (class_exists('ContentFilter')) {
+            $data['i_url_count'] = ContentFilter::countURLs($content);
+            $data['b_has_links'] = ($data['i_url_count'] > 0) ? 1 : 0;
+        } else {
+            $data['i_url_count'] = 0;
+            $data['b_has_links'] = 0;
+        }
+        
+        // Keyword matches
+        $keyword_data = $this->getKeywordMatches($content);
+        $data['i_keyword_matches'] = $keyword_data['count'];
+        $data['s_matched_keywords'] = !empty($keyword_data['keywords']) ? json_encode($keyword_data['keywords']) : null;
+        
+        // Submit time (from session or JavaScript)
+        $data['i_submit_time'] = $this->getSubmitTime();
+        
+        // Field count
+        $data['i_field_count'] = $this->countFilledFields();
+        
+        // Browser language
+        $data['s_browser_language'] = $this->getBrowserLanguage();
+        
+        // Email domain
+        $email = $this->getSubmittedEmail();
+        $data['s_email_domain'] = $this->extractEmailDomain($email);
+        
+        // Content languages count
+        $data['i_content_languages'] = $this->detectContentLanguages($content);
+        
+        // All caps check
+        if (class_exists('ContentFilter')) {
+            $caps_check = ContentFilter::checkAllCaps($content);
+            $data['b_all_caps'] = $caps_check['all_caps'] ? 1 : 0;
+        } else {
+            $data['b_all_caps'] = 0;
+        }
+        
+        // Time patterns
+        $data['i_hour_of_day'] = (int)date('G'); // 0-23
+        $data['i_day_of_week'] = (int)date('w'); // 0-6 (Sunday=0)
+        
+        return $data;
+    }
+    
+    /**
+     * Get keyword matches from content
+     * @param string $content Content to analyze
+     * @return array Match data with count and keywords array
+     */
+    private function getKeywordMatches($content) {
+        if (empty($content)) {
+            return array('count' => 0, 'keywords' => array());
+        }
+        
+        // Load keyword checking function
+        if (!function_exists('oscbb_check_spam_keywords')) {
+            require_once OSCBB_DATA_PATH . 'blacklist-keywords.php';
+        }
+        
+        // Check keywords with medium sensitivity
+        $result = oscbb_check_spam_keywords($content, 2);
+        
+        return array(
+            'count' => $result['score'],
+            'keywords' => array_slice($result['matches'], 0, 10) // Limit to first 10 keywords
+        );
+    }
+    
+    /**
+     * Calculate submission time from page load
+     * @return int Seconds elapsed or null if unavailable
+     */
+    private function getSubmitTime() {
+        // Try to get from session first
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        
+        $load_time = isset($_SESSION['oscbb_form_load_time']) ? $_SESSION['oscbb_form_load_time'] : null;
+        
+        if ($load_time) {
+            return time() - $load_time;
+        }
+        
+        // Try to get from JavaScript timestamp
+        $js_timestamp = Params::getParam('oscbb_timestamp');
+        if ($js_timestamp && is_numeric($js_timestamp)) {
+            $load_time_js = $js_timestamp / 1000; // Convert milliseconds to seconds
+            return time() - $load_time_js;
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Count how many form fields were filled
+     * @return int Number of non-empty POST fields
+     */
+    private function countFilledFields() {
+        $count = 0;
+        
+        // Count non-empty POST fields, excluding our security fields
+        $exclude_fields = array(
+            'oscbb_token', 'oscbb_timestamp', 'oscbb_fingerprint', 
+            'oscbb_checks', 'oscbb_js_enabled', 'oscbb_session_token',
+            'oscbb_field_map', 'oscbb_hp_check'
+        );
+        
+        foreach ($_POST as $key => $value) {
+            // Skip our security fields
+            if (in_array($key, $exclude_fields)) {
+                continue;
+            }
+            
+            // Skip honeypot fields
+            if (strpos($key, 'user_') === 0 || strpos($key, 'website_') === 0 || strpos($key, 'comment_') === 0) {
+                continue;
+            }
+            
+            // Count if not empty
+            if (!empty($value) && is_string($value) && trim($value) !== '') {
+                $count++;
+            }
+        }
+        
+        return $count;
+    }
+    
+    /**
+     * Get browser language from Accept-Language header
+     * @return string Primary language code (e.g., 'en', 'es', 'fr')
+     */
+    private function getBrowserLanguage() {
+        if (!isset($_SERVER['HTTP_ACCEPT_LANGUAGE'])) {
+            return null;
+        }
+        
+        $accept_language = $_SERVER['HTTP_ACCEPT_LANGUAGE'];
+        
+        // Parse Accept-Language header (e.g., "en-US,en;q=0.9,es;q=0.8")
+        // Get the first language
+        $languages = explode(',', $accept_language);
+        if (!empty($languages)) {
+            $primary = explode(';', $languages[0])[0]; // Remove quality values
+            $primary = explode('-', $primary)[0]; // Remove region code
+            return strtolower(trim($primary));
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Get submitted email from form
+     * @return string Email address or empty string
+     */
+    private function getSubmittedEmail() {
+        // Try various email field names
+        $email_fields = array('contactEmail', 's_email', 'email');
+        
+        foreach ($email_fields as $field) {
+            $email = Params::getParam($field);
+            if (!empty($email)) {
+                return $email;
+            }
+        }
+        
+        return '';
+    }
+    
+    /**
+     * Extract domain from email address
+     * @param string $email Email address
+     * @return string Domain or null
+     */
+    private function extractEmailDomain($email) {
+        if (empty($email) || strpos($email, '@') === false) {
+            return null;
+        }
+        
+        $parts = explode('@', $email);
+        return strtolower(trim($parts[1]));
+    }
+    
+    /**
+     * Detect number of different language scripts in content
+     * @param string $content Content to analyze
+     * @return int Number of different scripts (Latin, Cyrillic, CJK, Arabic, etc.)
+     */
+    private function detectContentLanguages($content) {
+        if (empty($content)) {
+            return 0;
+        }
+        
+        $script_count = 0;
+        
+        // Check for different Unicode scripts
+        // Latin (English, Spanish, French, etc.)
+        if (preg_match('/[a-zA-Z]/', $content)) {
+            $script_count++;
+        }
+        
+        // Cyrillic (Russian, Ukrainian, etc.)
+        if (preg_match('/[\x{0400}-\x{04FF}]/u', $content)) {
+            $script_count++;
+        }
+        
+        // CJK (Chinese, Japanese, Korean)
+        if (preg_match('/[\x{4E00}-\x{9FFF}\x{3040}-\x{309F}\x{30A0}-\x{30FF}\x{AC00}-\x{D7AF}]/u', $content)) {
+            $script_count++;
+        }
+        
+        // Arabic
+        if (preg_match('/[\x{0600}-\x{06FF}]/u', $content)) {
+            $script_count++;
+        }
+        
+        // Hebrew
+        if (preg_match('/[\x{0590}-\x{05FF}]/u', $content)) {
+            $script_count++;
+        }
+        
+        // Thai
+        if (preg_match('/[\x{0E00}-\x{0E7F}]/u', $content)) {
+            $script_count++;
+        }
+        
+        // Greek
+        if (preg_match('/[\x{0370}-\x{03FF}]/u', $content)) {
+            $script_count++;
+        }
+        
+        return $script_count;
+    }
+    
+    /**
      * Log a block/event to database
      * @param string $type Type of block (bot, spam, honeypot, javascript, rate_limit, content, other)
      * @param string $reason Reason for block
@@ -1649,7 +1912,7 @@ class OSCBotBlocker {
             $conn = $this->db->getOsclassDb();
             $comm = new DBCommandClass($conn);
             
-            // Prepare data
+            // Prepare basic data
             $data = array(
                 'dt_date' => date('Y-m-d H:i:s'),
                 's_ip' => $this->user_ip,
@@ -1660,6 +1923,12 @@ class OSCBotBlocker {
                 's_email' => $email,
                 's_blocked' => $blocked ? 1 : 0
             );
+            
+            // Add enhanced logging data (v1.3.0)
+            $enhanced_data = $this->extractEnhancedData();
+            if (!empty($enhanced_data)) {
+                $data = array_merge($data, $enhanced_data);
+            }
             
             // Insert into log table
             $result = $comm->insert(OSCBB_TABLE_LOG, $data);
