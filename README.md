@@ -167,6 +167,13 @@ The plugin uses multiple layers of validation to detect and block automated bots
 - ✅ **Token Regeneration** - Regenerate token if security is compromised
 - ✅ **Retention Reminder** - Shows current log retention setting
 
+#### Enhanced Entropy Detection:
+- ✅ **No-Space Name Rejection** - Blocks single-word names longer than 15 characters with no spaces
+- ✅ **Vowel Ratio Analysis** - Flags text with vowel ratio outside the normal 15–70% range
+- ✅ **Consonant Cluster Detection** - Catches impossible sequences of 5+ consecutive consonants
+- ✅ **Random Uppercase Pattern Detection** - Identifies bot-style mid-word uppercase mixing
+- ✅ **Applied to All Key Fields** - Covers name, message, and subject fields universally
+
 ---
 
 ## 🔧 Requirements
@@ -664,6 +671,15 @@ Debug messages will appear in your server's error log.
 - ✅ `cron-cleanup.php` endpoint file for server cron jobs
 - ✅ Fixed manual log deletion (parameter name conflict with osClass resolved)
 - ✅ Improved form submission handling
+
+**Added - Enhanced Entropy Detection:**
+- ✅ Mathematical gibberish detection via `isGibberish()` method in `OSCBotBlocker.class.php`
+- ✅ Long single-word name rejection (no spaces + over 15 characters = blocked)
+- ✅ Vowel ratio analysis — real words have 15–70% vowels, random strings do not
+- ✅ Impossible consonant cluster detection (5+ consecutive consonants)
+- ✅ Random mid-word uppercase pattern detection (bot-style camelCase strings)
+- ✅ Checks applied universally to name, message, and subject fields
+- ✅ Catches all current and future variations without needing keyword updates
 
 **Files Added:**
 - `cron-cleanup.php` - Secure cron endpoint for automatic log cleanup

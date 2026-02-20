@@ -44,7 +44,7 @@ if (!defined('OSCBB_PATH'))          define('OSCBB_PATH',          dirname(__FIL
 if (!defined('OSCBB_INCLUDES_PATH')) define('OSCBB_INCLUDES_PATH', OSCBB_PATH . 'includes/');
 if (!defined('OSCBB_DATA_PATH'))     define('OSCBB_DATA_PATH',     OSCBB_PATH . 'data/');
 if (!defined('OSCBB_VERSION'))       define('OSCBB_VERSION',       '1.3.0');
-if (!defined('OSCBB_DEBUG'))         define('OSCBB_DEBUG',         true);
+if (!defined('OSCBB_DEBUG'))         define('OSCBB_DEBUG',         false);
 if (!defined('OSCBB_TABLE_LOG'))     define('OSCBB_TABLE_LOG',     DB_TABLE_PREFIX . 't_oscbb_log');
 if (!defined('OSCBB_TABLE_STATS'))   define('OSCBB_TABLE_STATS',   DB_TABLE_PREFIX . 't_oscbb_stats');
 if (!defined('OSCBB_TABLE_BLACKLIST')) define('OSCBB_TABLE_BLACKLIST', DB_TABLE_PREFIX . 't_oscbb_blacklist');
@@ -56,7 +56,6 @@ try {
     
     $message = 'OSC Bot Blocker: Cron cleanup completed successfully at ' . date('Y-m-d H:i:s');
     echo $message;
-    error_log($message);
     
 } catch (Exception $e) {
     // Log detailed error for admin debugging
