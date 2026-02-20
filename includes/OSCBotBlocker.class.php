@@ -524,7 +524,25 @@ class OSCBotBlocker {
         $message = Params::getParam('message');
         if (empty($message)) $message = Params::getParam('s_message');
         $fields['message'] = $message;
-        
+
+        // --- Gibberish Detection ---
+        // Detects bot-generated random strings regardless of content variation.
+        // Catches spam like "TnjBNulLnzQAwdFEMoomDyl" universally.
+        if (!empty($fields['name']) && $this->isGibberish($fields['name'], 'name')) {
+            $this->debugLog('Gibberish name detected: ' . $fields['name']);
+            return 'Submission rejected: Name appears to be computer-generated.';
+        }
+
+        if (!empty($fields['message']) && $this->isGibberish($fields['message'], 'message')) {
+            $this->debugLog('Gibberish message detected: ' . $fields['message']);
+            return 'Submission rejected: Message appears to be computer-generated.';
+        }
+
+        if (!empty($fields['subject']) && $this->isGibberish($fields['subject'], 'message')) {
+            $this->debugLog('Gibberish subject detected: ' . $fields['subject']);
+            return 'Submission rejected: Subject appears to be computer-generated.';
+        }
+
         // Validate fields
         $result = ContentFilter::validateFormFields($fields);
         
@@ -536,6 +554,72 @@ class OSCBotBlocker {
         $this->debugLog('Form field validation passed');
         return true;
     }
+	
+	/**
+	 * Detect if a string is random/gibberish computer-generated text
+	 * Checks vowel ratio, word structure, and character entropy
+	 * @param string $text The text to check
+	 * @param string $field_type 'name' or 'message' for different thresholds
+	 * @return bool True if gibberish detected
+	 */
+	private function isGibberish($text, $field_type = 'message') {
+        if (empty($text)) {
+        return false;
+    }
+
+    $text = trim($text);
+    $length = strlen($text);
+
+    // Very short text — let other validators handle it
+    if ($length < 6) {
+        return false;
+    }
+
+    // --- Check 1: Name fields must contain at least one space ---
+    // Real full names have a first and last name separated by a space.
+    // "TnjBNulLnzQAwdFEMoomDyl" has no spaces at all.
+    if ($field_type === 'name' && $length > 15 && strpos($text, ' ') === false) {
+        $this->debugLog('Gibberish detected: name field too long with no spaces');
+        return true;
+    }
+
+    // --- Check 2: Vowel ratio ---
+    // Real English/French words have 25–55% vowels.
+    // Random strings are outside this range.
+    $vowels = preg_match_all('/[aeiouAEIOU]/', $text, $matches);
+    $letters = preg_match_all('/[a-zA-Z]/', $text, $letter_matches);
+
+    if ($letters > 8) {
+        $vowel_ratio = $vowels / $letters;
+        if ($vowel_ratio < 0.15 || $vowel_ratio > 0.70) {
+            $this->debugLog('Gibberish detected: abnormal vowel ratio (' . round($vowel_ratio, 2) . ')');
+            return true;
+        }
+    }
+
+    // --- Check 3: Consecutive consonant clusters ---
+    // Real words rarely have more than 3 consonants in a row.
+    // "TnjBNulL" has clusters like "TnjBN" which are impossible in real speech.
+    if (preg_match('/[bcdfghjklmnpqrstvwxyzBCDFGHJKLMNPQRSTVWXYZ]{5,}/', $text)) {
+        $this->debugLog('Gibberish detected: impossible consonant cluster found');
+        return true;
+    }
+
+    // --- Check 4: Random uppercase mixing ---
+    // Real sentences are either normal case or all-caps.
+    // Bots often produce "rAnDoM" case mixing like "TnjBNulLnzQ".
+    // Count uppercase letters that are NOT at the start of a word.
+    $uppercase_mid_word = preg_match_all('/(?<=[a-z])[A-Z]/', $text, $m);
+    $total_letters_for_caps = max(1, $letters);
+    $random_caps_ratio = $uppercase_mid_word / $total_letters_for_caps;
+
+    if ($length > 10 && $random_caps_ratio > 0.25) {
+        $this->debugLog('Gibberish detected: random mid-word uppercase pattern (' . round($random_caps_ratio, 2) . ')');
+        return true;
+    }
+
+    return false;
+}
 	
     /**
      * Run all validation checks
@@ -1523,7 +1607,7 @@ class OSCBotBlocker {
      * Cleans old logs and expired session data
      */
     public function dailyCleanup() {
-		error_log('OSC Bot Blocker: dailyCleanup() method was called at ' . date('Y-m-d H:i:s'));
+        $this->debugLog('dailyCleanup() method was called at ' . date('Y-m-d H:i:s'));
         $this->cleanOldLogs();
         $this->cleanExpiredSessions();
         $this->debugLog('Daily cleanup completed');
