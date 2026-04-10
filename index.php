@@ -563,6 +563,7 @@ osc_add_hook('header', 'oscbb_hook_header');
 // VALIDATION HOOKS - Validate submissions when forms are posted
 osc_add_hook('before_item_post', 'oscbb_hook_validate_item');
 osc_add_hook('pre_contact_post', 'oscbb_hook_validate_contact');
+osc_add_hook('pre_item_contact_post', 'oscbb_hook_validate_contact');
 osc_add_hook('before_user_register', 'oscbb_hook_validate_registration');
 osc_add_hook('pre_item_add_comment_post', 'oscbb_hook_validate_comment');
 
@@ -574,7 +575,9 @@ if (OC_ADMIN) {
 }
 
 // CRON HOOKS
-osc_add_hook('cron_hourly', 'oscbb_hook_daily_cleanup');
+// Note: Automatic cleanup is handled via server cron job (see Cron Setup tab in admin)
+// The cron_daily and cron_hourly hooks do not reliably trigger for plugins
+// osc_add_hook('cron_hourly', 'oscbb_hook_daily_cleanup');
 
 // PLUGIN LIFECYCLE HOOKS
 osc_add_hook(osc_plugin_path(__FILE__) . '_install', 'oscbb_install');
